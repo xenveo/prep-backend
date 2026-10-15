@@ -1,0 +1,616 @@
+Software Requirements Specification: AI
+Interview Prep Tool
+ Oct 13, 2026  ·  @Someone
+1. Introduction
+1.1 Purpose
+This SRS defines the requirements for an invite-only web app that prepares candidates
+for interviews for admin-approved job roles. Candidates study flash cards, then complete
+a voice-enabled AI mock interview that gives feedback after every answer, re-asks the
+question to check learning, and ends with a preparedness score.
+The document is written for the product owner, developers, QA and anyone building or
+evaluating the first release.
+1.2 Scope
+The product, referred to here as PrepPilot (working name), covers:
+Invite-only access with email-based login
+Admin management of users, job roles, flash cards and question banks
+A flash-card study step per job role
+An AI interviewer that asks questions by voice and text, evaluates answers, gives
+written and spoken feedback, and re-asks each question once
+Per-question and per-session preparedness scoring, with a results report
+1.3 Definitions
+Term Meaning
+Candidate An invited user preparing for an interview
+Admin A user who manages invites, job roles, content and
+reviews results
+Job role An admin-approved position (e.g. Customer
+Support Associate) with its own flash cards and
+questions
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 1 of 18
+
+=====PAGE=====
+1.4 Document conventions
+Requirements use IDs (e.g. FR-AUTH-01). "Shall" marks a mandatory requirement for
+release 1; "should" marks a desirable one. Priorities are Must, Should or Could.
+2. Overall description
+2.1 Product perspective
+PrepPilot is a new, standalone web app. It relies on three external services: an LLM API for
+interviewing and evaluation, a speech service for STT and TTS, and an email service for
+invites and login links. No integration with an ATS or HR system is required in release 1.
+2.2 User classes
+Term Meaning
+Flash card A short study card: a likely question, what a good
+answer covers, and a tip
+Session One end-to-end mock interview for one job role
+Attempt One candidate answer to one question; each
+question has a first attempt and a retry
+Content feedback Feedback on what the answer said: correctness,
+completeness, structure
+Delivery feedback Feedback on how it was said: clarity, pace, filler
+words, confidence, conciseness
+Preparedness score A 0 to 100 score summarising readiness for the role
+LLM Large language model used as the interviewer and
+evaluator
+STT / TTS Speech-to-text / text-to-speech
+User class Description Key needs
+Candidate Invited job seeker or internal
+employee; varied tech comfort;
+mostly on laptop, some on mobile
+Simple login, clear steps, honest and
+actionable feedback, a score they
+understand
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 2 of 18
+
+=====PAGE=====
+2.3 Operating environment
+Latest two versions of Chrome, Edge, Safari and Firefox on desktop; Chrome on
+Android and Safari on iOS
+Microphone access required for voice answers; a text-only fallback shall exist
+Cloud-hosted; HTTPS only
+2.4 Constraints
+Only invited email addresses can log in; there is no public sign-up.
+Candidates see only job roles that an admin has approved and assigned to them.
+AI output must stay within interview coaching; it shall not make hiring decisions.
+Personal data, audio and transcripts must follow applicable privacy law (e.g. GDPR,
+India's DPDP Act 2023), depending on where users are.
+2.5 Assumptions and dependencies
+An LLM can reliably return structured JSON evaluations against a rubric.
+Candidates answer in one language per session (English in release 1).
+Email delivery is reliable enough for magic-link or OTP login.
+Admins supply or approve the flash cards and question bank for each role; AI may draft
+them for admin review.
+User class Description Key needs
+Admin Recruiter, trainer or program
+manager
+Invite users, publish roles and
+content, see who is prepared and
+where they struggle
+Super
+admin
+Owner of the deployment Manage admins, AI settings, data
+retention
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 3 of 18
+
+=====PAGE=====
+3. User journeys
+3.1 Candidate journey
+The coaching loop (ask, answer, feedback, re-ask, compare) runs once per question, 5
+times by default, before the session is scored.
+3.2 Admin journey
+1. Log in and create a job role with description, seniority and key skills.
+2. Add flash cards and questions with rubrics, or generate drafts with AI and edit them.
+3. Preview the role and run a test interview.
+4. Approve the role so it becomes visible to assigned candidates.
+5. Invite candidates by email or CSV and assign them to the role.
+6. Monitor progress and scores; open sessions to review transcripts and feedback.
+7. Refine cards, questions and rubrics based on where candidates struggle.
+candidate journey · 11 steps, 1 loop per question
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 4 of 18
+
+=====PAGE=====
+4. Functional requirements
+4.1 Authentication and access (AUTH)
+ID Requirement Priority
+FR-AUTH-01 The system shall allow login only for email
+addresses on the invite list.
+Must
+FR-AUTH-02 Login shall be passwordless: a one-time code or
+magic link sent to the email, valid for 10 minutes
+and single use.
+Must
+FR-AUTH-03 Uninvited emails shall see a neutral message ("If
+you're invited, you'll get an email") so the invite list
+is not exposed.
+Must
+FR-AUTH-04 Sessions shall expire after 7 days of inactivity;
+users can log out from any page.
+Must
+FR-AUTH-05 Login attempts shall be rate-limited (e.g. 5 code
+requests per email per hour).
+Must
+FR-AUTH-06 Role-based access: Candidate, Admin, Super
+admin.
+Must
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 5 of 18
+
+=====PAGE=====
+4.2 Admin: users and invites (ADM)
+4.3 Admin: job roles and content (ROLE)
+ID Requirement Priority
+FR-ADM-01 Admins shall invite candidates by single email or
+CSV upload (email, name, optional roles).
+Must
+FR-ADM-02 Invites shall send an email with a login link; admins
+can resend or revoke an invite.
+Must
+FR-ADM-03 Admins shall assign one or more job roles to each
+candidate.
+Must
+FR-ADM-04 Admins shall deactivate a candidate, which ends
+their sessions immediately.
+Must
+FR-ADM-05 Admins should set an optional access expiry date
+and attempt limit per candidate.
+Should
+FR-ADM-06 All admin actions shall be written to an audit log
+(who, what, when).
+Should
+ID Requirement Priority
+FR-ROLE-01 Admins shall create, edit and archive job roles with
+title, description, seniority and key skills.
+Must
+FR-ROLE-02 A job role shall have a status: Draft, Approved or
+Archived. Candidates see only Approved roles
+assigned to them.
+Must
+FR-ROLE-03 Admins shall manage flash cards per role: question,
+what a strong answer covers, sample answer
+outline, common mistakes, tip.
+Must
+FR-ROLE-04 Admins shall manage a question bank per role.
+Each question has text, category (behavioural,
+situational, role knowledge, motivation), difficulty
+and an evaluation rubric (expected key points and
+red flags).
+Must
+FR-ROLE-05 Admins shall set the number of questions per
+session (default 5) and whether order is fixed or
+random.
+Must
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 6 of 18
+
+=====PAGE=====
+4.4 Candidate dashboard (DASH)
+4.5 Flash-card study (CARD)
+ID Requirement Priority
+FR-ROLE-06 Admins should be able to generate draft flash
+cards and questions with AI from the role
+description; drafts need admin approval before
+candidates see them.
+Should
+FR-ROLE-07 Admins should preview a role exactly as a
+candidate sees it, including a test interview.
+Should
+ID Requirement Priority
+FR-DASH-01 After login, candidates shall see a list of their
+assigned, approved job roles.
+Must
+FR-DASH-02 Each role card shall show progress (not started,
+studying, interview in progress, completed) and
+the best preparedness score.
+Must
+FR-DASH-03 Candidates shall be able to resume an unfinished
+session.
+Must
+FR-DASH-04 Candidates shall see a history of past sessions
+with scores and links to reports.
+Should
+ID Requirement Priority
+FR-CARD-01 Selecting a role shall open its flash cards one at a
+time with next, previous and flip controls.
+Must
+FR-CARD-02 The front shows the question; the back shows
+what a strong answer covers, a tip and common
+mistakes.
+Must
+FR-CARD-03 The system shall track which cards were viewed. Must
+FR-CARD-04 The "Start interview" button shall appear once all
+cards are viewed. Admins can make this optional
+per role.
+Should
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 7 of 18
+
+=====PAGE=====
+4.6 AI interview (INT)
+ID Requirement Priority
+FR-CARD-05 Candidates should be able to have a card read
+aloud (TTS).
+Could
+ID Requirement Priority
+FR-INT-01 Before starting, the system shall run a mic check
+and show a short explainer of how the interview
+works.
+Must
+FR-INT-02 The AI interviewer shall introduce itself and the
+role, then ask questions drawn from the role's
+question bank.
+Must
+FR-INT-03 Each question shall be shown as text and spoken
+aloud via TTS.
+Must
+FR-INT-04 Candidates shall answer by voice (recorded, then
+transcribed) or by typing.
+Must
+FR-INT-05 The candidate shall see a live or post-answer
+transcript and can re-record before submitting.
+Should
+FR-INT-06 Each answer shall have a soft time limit (default 2
+minutes, admin-configurable) with a visible timer.
+Should
+FR-INT-07 The interviewer may ask at most one short follow-
+up when an answer is too vague to evaluate.
+Could
+FR-INT-08 The AI shall stay in the interviewer persona and
+decline off-topic requests politely.
+Must
+FR-INT-09 If the AI or speech service fails, the session state
+shall be saved and the candidate offered retry or
+text mode.
+Must
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 8 of 18
+
+=====PAGE=====
+4.7 Per-answer feedback (FB)
+4.8 Retry loop (RETRY)
+ID Requirement Priority
+FR-FB-01 After each answer, the system shall evaluate it
+against the question's rubric and return feedback
+within 8 seconds (p90).
+Must
+FR-FB-02 Written feedback shall include: what was right,
+what was missing or wrong, and one concrete
+improvement.
+Must
+FR-FB-03 Delivery feedback shall cover clarity, structure
+(e.g. STAR for behavioural questions), conciseness,
+filler words and confidence of wording.
+Must
+FR-FB-04 Delivery metrics from voice answers shall include
+words per minute, filler-word count and answer
+length.
+Should
+FR-FB-05 The same feedback shall be spoken aloud in a short
+summary (about 30 seconds) via TTS.
+Must
+FR-FB-06 Feedback shall show a sub-score per dimension for
+the attempt (see section 5).
+Must
+FR-FB-07 Feedback should include a short example of a
+stronger answer opening, never a full script to
+memorise.
+Should
+ID Requirement Priority
+FR-RETRY-01 After feedback, the interviewer shall ask the same
+question again.
+Must
+FR-RETRY-02 The retry shall be evaluated with the same rubric,
+and the evaluator shall also check whether the
+feedback points were applied.
+Must
+FR-RETRY-03 After the retry, the system shall show a short
+comparison: first attempt vs retry, what improved,
+what still needs work.
+Must
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 9 of 18
+
+=====PAGE=====
+4.9 Scoring and results (SCORE)
+4.10 Admin reporting (REP)
+ID Requirement Priority
+FR-RETRY-04 Each question gets exactly one retry in release 1;
+the number of retries should be admin-
+configurable later.
+Must
+FR-RETRY-05 The candidate may skip the retry; a skipped retry
+counts as no improvement.
+Should
+ID Requirement Priority
+FR-SCORE-01 At session end, the system shall compute a
+preparedness score from 0 to 100 and a readiness
+band (see section 5).
+Must
+FR-SCORE-02 The results page shall show the overall score, band,
+per-question scores, improvement between
+attempts, top 3 strengths and top 3 focus areas.
+Must
+FR-SCORE-03 Candidates shall be able to replay the transcript
+and feedback for each question.
+Should
+FR-SCORE-04 Candidates should be able to download the report
+as PDF.
+Could
+FR-SCORE-05 Candidates can retake the interview for a role;
+each session is scored separately and the best and
+latest are shown.
+Must
+ID Requirement Priority
+FR-REP-01 Admins shall see per-role and per-candidate
+dashboards: sessions completed, average score,
+band distribution.
+Must
+FR-REP-02 Admins shall open any candidate session to see
+transcripts, AI feedback and scores.
+Must
+FR-REP-03 Admins should see the questions candidates
+struggle with most, to improve flash cards.
+Should
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 10 of 18
+
+=====PAGE=====
+5. Preparedness scoring model
+The preparedness score weights the improved answer most, because the goal is to move
+each candidate from low to high preparedness, and adds credit for learning between
+attempts. The first answer still counts a little, as an honest baseline. All weights below are
+defaults that admins can tune per role.
+5.1 Attempt dimensions
+The evaluator rates each attempt on four dimensions using a 1 to 5 anchored rubric,
+mapped to 0, 25, 50, 75 and 100.
+5.2 Learning score
+For each retry, the evaluator lists the improvement points from the first feedback and
+marks each as applied, partly applied or not applied (1, 0.5, 0). The learning score for that
+question is the share applied, from 0 to 100. A skipped retry scores 0.
+5.3 Session score
+\text{Preparedness} = 0.20\,\overline{A_1} + 0.55\,\overline{A_2} + 
+0.25\,\overline{L}
+ID Requirement Priority
+FR-REP-04 Admins shall export results to CSV. Should
+FR-REP-05 Admins should be able to flag an AI evaluation as
+wrong, with a note, to improve the rubric.
+Should
+Dimension What it measures Weight in attempt score
+Content Covers the rubric's key points; accurate; no red
+flags
+45%
+Structure Logical order; STAR or similar for behavioural
+questions; clear conclusion
+20%
+Delivery Clarity, conciseness, filler words, pace (voice),
+confident wording
+20%
+Relevance Answers the question asked; tailored to the role 15%
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 11 of 18
+
+=====PAGE=====
+Here A1 is the average first-attempt score, A2 the average retry score, and L the average
+learning score, each from 0 to 100.
+5.4 Readiness bands
+5.5 Scoring reliability
+The evaluator shall return structured JSON (scores, evidence quotes from the answer,
+feedback text) validated against a schema; invalid output is retried once.
+Each score shall cite evidence from the transcript so admins can audit it.
+Evaluation runs at low temperature for consistency. Before launch, scores on a set of at
+least 30 sample answers per role should be compared with a human reviewer's, aiming
+for agreement within one rubric level on 80% of answers.
+5.6 Progress across sessions
+Because the aim is growth, the candidate's dashboard and results page shall show their
+first-session score as a baseline, their latest score, and the change between them, plus
+band movement (e.g. Developing to Nearly ready). Admins see the same baseline-to-
+latest change per candidate and per role.
+6. Data model
+Nine core entities cover release 1; audio files live in object storage and are referenced by
+URL.
+Score Band Message to candidate
+85 to 100 Interview ready Strong and consistent; keep practising delivery
+70 to 84 Nearly ready Solid base; fix the listed focus areas
+50 to 69 Developing Review flash cards and retake
+0 to 49 Not ready yet Study the flash cards again before retaking
+Entity Key fields Relationships
+User id, email, name, role
+(candidate/admin/super admin), status,
+access_expires_at, created_at
+Has many RoleAssignments,
+Sessions
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 12 of 18
+
+=====PAGE=====
+Card views are stored as a simple CardView record (user_id, flash_card_id, viewed_at).
+Every LLM call should also be logged with prompt version, model, tokens and latency for
+cost tracking and debugging.
+7. External interfaces
+7.1 User interface
+The candidate UI has six screens; the admin UI has five.
+Entity Key fields Relationships
+Invite id, email, invited_by, token_hash, status
+(pending/accepted/revoked), sent_at
+Belongs to User (admin)
+JobRole id, title, description, seniority, skills,
+status (draft/approved/archived),
+questions_per_session, order_mode
+Has many FlashCards,
+Questions
+RoleAssignment user_id, job_role_id, assigned_by,
+max_attempts
+Joins User and JobRole
+FlashCard id, job_role_id, question,
+strong_answer_points, tip,
+common_mistakes, order, status
+Belongs to JobRole
+Question id, job_role_id, text, category, difficulty,
+rubric (key_points, red_flags), status
+Belongs to JobRole
+Session id, user_id, job_role_id, status,
+started_at, completed_at, score, band,
+strengths, focus_areas
+Has many Attempts
+Attempt id, session_id, question_id, attempt_no (1
+or 2), transcript, audio_url, duration_s,
+wpm, filler_count, dimension_scores,
+learning_score, feedback_text,
+feedback_audio_url, evidence
+Belongs to Session and
+Question
+AuditLog id, actor_id, action, entity, entity_id,
+timestamp
+References User
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 13 of 18
+
+=====PAGE=====
+The interview room shows the AI interviewer (avatar or waveform), the current question, a
+record or type control, a timer, the transcript, and a feedback panel that expands after
+each answer. Every spoken output also appears as text, so the flow works with sound off.
+7.2 AI interface (LLM)
+Three prompt roles, each versioned in config rather than code:
+1. Interviewer: given the role, question and conversation so far, produces the spoken
+question, transitions and the retry prompt.
+2. Evaluator: given the question, rubric, transcript and (for retries) the first feedback,
+returns JSON with dimension scores, evidence, what was right, what was missing,
+delivery notes, improvement points and a spoken summary.
+3. Session summariser: given all attempts, returns strengths, focus areas and the band
+message.
+The LLM provider shall sit behind an internal adapter so the model can be changed
+without app changes.
+7.3 Speech interface
+STT: streaming or batch transcription with word timestamps (needed for pace and
+filler-word metrics).
+TTS: a natural voice for questions and feedback; audio is cached per question to cut
+cost and latency.
+7.4 Email interface
+Transactional email (e.g. Amazon SES, SendGrid or Postmark) for invites, login codes and
+optional session-complete notices. Emails must include SPF/DKIM setup to avoid spam
+folders.
+Area Screens
+Candidate Login (email + code), Dashboard (assigned roles),
+Flash cards, Interview setup (mic check), Interview
+room, Results
+Admin Users and invites, Job roles, Role content editor
+(cards + questions + rubrics), Reports, Settings
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 14 of 18
+
+=====PAGE=====
+8. Non-functional requirements
+ID Area Requirement
+NFR-01 Performance Pages load in under 2 s on broadband. Spoken
+question starts within 2 s. Feedback returns within
+8 s at p90.
+NFR-02 Scalability Support 100 concurrent interview sessions in
+release 1 without degradation.
+NFR-03 Availability 99.5% monthly uptime; in-progress sessions
+survive a page refresh.
+NFR-04 Security HTTPS/TLS 1.2+, encryption at rest, hashed login
+tokens, OWASP Top 10 controls, admin routes
+server-side authorised.
+NFR-05 AI safety Prompt-injection guards (candidate text treated as
+data), output moderation, no hiring decision
+language, persona limits.
+NFR-06 Privacy Explicit consent before recording audio. Audio
+deleted after 30 days by default; transcripts kept
+until the candidate or admin deletes them. Users
+can request export or deletion.
+NFR-07 Accessibility WCAG 2.1 AA; keyboard navigable; captions for all
+spoken content; text-only answer mode.
+NFR-08 Usability A first-time candidate can finish login to first
+question in under 3 minutes without help.
+NFR-09 Fairness Delivery feedback shall not penalise accent or non-
+native grammar that does not affect clarity; rubrics
+reviewed for bias.
+NFR-10 Cost Track AI and speech cost per session; target under
+USD 0.50 per 5-question session (to be validated).
+NFR-11 Observability Structured logs, error tracking, and per-call LLM
+latency and failure metrics.
+NFR-12 Maintainability Prompts, rubrics and scoring weights are
+configuration, editable without a code deploy.
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 15 of 18
+
+=====PAGE=====
+9. Suggested architecture and tech stack
+A single web backend with four modules is enough for release 1; the interview engine is
+the core, and every AI, speech and email provider sits behind an adapter.
+9.1 One answer, end to end
+1. The browser records the answer (MediaRecorder) and uploads it, or sends typed text.
+2. The speech service returns a transcript with word timestamps; the engine computes
+pace and filler-word count.
+3. The scoring engine sends question, rubric and transcript to the LLM evaluator and
+validates the JSON it returns.
+4. The attempt is saved; TTS turns the feedback summary into audio.
+5. The candidate sees and hears the feedback; the engine then re-asks the question or
+moves on.
+system architecture · 2 clients, 4 backend modules, 6 services
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 16 of 18
+
+=====PAGE=====
+9.2 Suggested stack
+10. Scope boundaries, open questions and acceptance
+10.1 Out of scope for release 1
+Video recording or body-language analysis
+Languages other than English
+Public sign-up, payments or subscriptions
+ATS or HRIS integration, and any use of scores in real hiring decisions
+Native mobile apps (responsive web only)
+10.2 Open questions
+Layer Suggestion Notes
+Frontend Next.js (React, TypeScript), Tailwind
+CSS
+Responsive; MediaRecorder for
+audio
+Backend Node.js (NestJS) or Python (FastAPI) REST plus WebSocket for live
+interview turns
+Database PostgreSQL Managed (e.g. AWS RDS or
+Supabase)
+Cache and
+jobs
+Redis Session state, background jobs
+File storage S3-compatible object storage Audio with lifecycle expiry
+Auth Passwordless email OTP (e.g. Auth.js,
+Supabase Auth, or custom)
+Invite list checked server-side
+LLM Anthropic Claude, OpenAI or similar Behind an adapter; JSON-schema
+output
+Speech STT: Deepgram, AssemblyAI or
+Whisper. TTS: ElevenLabs, Azure or
+Google
+Word timestamps needed from
+STT
+Email Amazon SES, Postmark or SendGrid SPF/DKIM configured
+Hosting Vercel for frontend; AWS or GCP for
+backend
+Region chosen to meet data-
+residency needs
+Should candidates see their numeric score, or only the readiness band?
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 17 of 18
+
+=====PAGE=====
+10.3 Acceptance criteria (release 1)
+1. An invited user logs in with an email code; an uninvited email cannot.
+2. A candidate sees only approved, assigned roles.
+3. A candidate completes all flash cards and starts the interview.
+4. For each question, the candidate answers by voice or text and receives written and
+spoken feedback covering content and delivery.
+5. The same question is re-asked, re-evaluated, and a first vs retry comparison is shown.
+6. The session ends with a 0 to 100 score, a band, strengths and focus areas that match
+section 5.
+7. An admin can invite users, publish a role with cards and questions, and view every
+candidate's results.
+8. Feedback is returned within 8 s at p90 across 100 test sessions.
+Can admins see candidate transcripts by default, or only with candidate consent?
+Is flash-card completion mandatory before the interview?
+One admin team for all roles, or separate admins per department or client?
+Where must data be hosted (e.g. India-only)?
+Is a talking avatar wanted, or is a voice with a waveform enough?
+Software Requirements Speciﬁcation: AI Interview Prep Tool
+Page 18 of 18

@@ -1,0 +1,592 @@
+// PrepPilot data model. Field-level spec: docs/BACKEND_SPEC.md "Data model";
+// sketch and erasure rules: docs/BACKEND_IMPLEMENTATION.md §4.
+// Tables and columns are snake_case in Postgres so raw SQL (views, reports) reads naturally.
+// Partial indexes and views live in raw SQL migrations.
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [citext, pgcrypto]
+}
+
+enum UserRole {
+  candidate
+  admin
+  super_admin
+}
+
+enum UserStatus {
+  invite_pending
+  active
+  deactivated
+  revoked
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+enum RoleStatus {
+  draft
+  approved
+  archived
+}
+
+enum Seniority {
+  entry
+  junior
+  mid
+  senior
+}
+
+enum ContentStatus {
+  ai_draft
+  approved
+  archived
+}
+
+enum CardCategory {
+  behavioural
+  situational
+  role_knowledge
+  motivation
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+}
+
+enum SessionStatus {
+  in_progress
+  completed
+  abandoned
+  failed
+}
+
+enum AnswerMode {
+  voice
+  typed
+}
+
+enum AttemptStatus {
+  received
+  transcribing
+  evaluating
+  done
+  failed
+}
+
+enum Band {
+  not_ready
+  developing
+  nearly_ready
+  interview_ready
+}
+
+enum FlagStatus {
+  open
+  resolved
+}
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @unique @db.Citext
+  name            String?
+  title           String?
+  role            UserRole
+  status          UserStatus @default(invite_pending)
+  accessExpiresAt DateTime?  @map("access_expires_at")
+  firstLoginAt    DateTime?  @map("first_login_at")
+  lastActiveAt    DateTime?  @map("last_active_at")
+  /// Erasure stage 1 (hidden). The row is hard-deleted by the erasure-purge job.
+  deletedAt       DateTime?  @map("deleted_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  invites         Invite[]
+  assignments     RoleAssignment[]
+  sessions        Session[]
+  authSessions    AuthSession[]
+  cardViews       CardView[]
+  consents        Consent[]
+  activityEvents  ActivityEvent[]
+  savedFilters    SavedFilter[]
+  privacyRequests PrivacyRequest[]
+
+  @@map("users")
+}
+
+model Invite {
+  id        String       @id @default(uuid()) @db.Uuid
+  email     String       @db.Citext
+  userId    String       @map("user_id") @db.Uuid
+  invitedBy String?      @map("invited_by") @db.Uuid
+  batchId   String?      @map("batch_id") @db.Uuid
+  tokenHash String       @unique @map("token_hash")
+  status    InviteStatus @default(pending)
+  sentAt    DateTime     @map("sent_at")
+  expiresAt DateTime     @map("expires_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch InviteBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("invites")
+}
+
+model InviteBatch {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdBy String   @map("created_by") @db.Uuid
+  /// "single" | "csv"
+  source    String
+  fileName  String?  @map("file_name")
+  sent      Int
+  skipped   Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  invites Invite[]
+
+  @@map("invite_batches")
+}
+
+/// OTP codes. Keyed by email (not user) so unknown emails leave no trace; the purge job deletes by email.
+model AuthCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  email     String    @db.Citext
+  codeHash  String    @map("code_hash")
+  expiresAt DateTime  @map("expires_at")
+  tries     Int       @default(0)
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([email, createdAt])
+  @@map("auth_codes")
+}
+
+model AuthSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  lastSeenAt DateTime  @map("last_seen_at")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_sessions")
+}
+
+model JobRole {
+  id              String     @id @default(uuid()) @db.Uuid
+  slug            String     @unique
+  title           String
+  /// Short candidate-facing line (candidate UI Role.blurb).
+  blurb           String     @default("")
+  descriptionHtml String     @default("") @map("description_html")
+  seniority       Seniority
+  keySkills       String[]   @map("key_skills")
+  status          RoleStatus @default(draft)
+  /// RoleSettings (admin UI types.ts)
+  settings        Json
+  approvedAt      DateTime?  @map("approved_at")
+  approvedBy      String?    @map("approved_by") @db.Uuid
+  lastAiDraftAt   DateTime?  @map("last_ai_draft_at")
+  updatedBy       String?    @map("updated_by") @db.Uuid
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  cards       FlashCard[]
+  questions   Question[]
+  assignments RoleAssignment[]
+  sessions    Session[]
+
+  @@map("job_roles")
+}
+
+model RoleAssignment {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  jobRoleId   String    @map("job_role_id") @db.Uuid
+  assignedBy  String?   @map("assigned_by") @db.Uuid
+  assignedAt  DateTime  @default(now()) @map("assigned_at")
+  /// null = no limit
+  maxAttempts Int?      @map("max_attempts")
+  removedAt   DateTime? @map("removed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role JobRole @relation(fields: [jobRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobRoleId])
+  @@map("role_assignments")
+}
+
+model FlashCard {
+  id                  String        @id @default(uuid()) @db.Uuid
+  jobRoleId           String        @map("job_role_id") @db.Uuid
+  /// 1-based, contiguous per role. The candidate UI's FlashCard.id.
+  position            Int
+  category            CardCategory
+  question            String
+  strongAnswerPoints  String[]      @map("strong_answer_points")
+  sampleAnswerOutline String?       @map("sample_answer_outline")
+  commonMistakes      String[]      @map("common_mistakes")
+  tip                 String        @db.VarChar(90)
+  status              ContentStatus @default(approved)
+  /// null = drafted by AI
+  createdBy           String?       @map("created_by") @db.Uuid
+  approvedBy          String?       @map("approved_by") @db.Uuid
+  approvedAt          DateTime?     @map("approved_at")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  role      JobRole    @relation(fields: [jobRoleId], references: [id], onDelete: Cascade)
+  views     CardView[]
+  questions Question[]
+
+  @@unique([jobRoleId, position])
+  @@map("flash_cards")
+}
+
+model CardView {
+  userId      String   @map("user_id") @db.Uuid
+  flashCardId String   @map("flash_card_id") @db.Uuid
+  viewedAt    DateTime @default(now()) @map("viewed_at")
+
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card FlashCard @relation(fields: [flashCardId], references: [id], onDelete: Cascade)
+
+  @@id([userId, flashCardId])
+  @@map("card_views")
+}
+
+model Question {
+  id               String        @id @default(uuid()) @db.Uuid
+  jobRoleId        String        @map("job_role_id") @db.Uuid
+  flashCardId      String?       @map("flash_card_id") @db.Uuid
+  text             String
+  category         CardCategory
+  difficulty       Difficulty
+  /// {keyPoints:[{id,point,example}], redFlags:[], expectedStructure}
+  rubric           Json
+  status           ContentStatus @default(approved)
+  /// Latest admin test evaluation (TestEvaluation). Never a candidate attempt.
+  sampleEvaluation Json?         @map("sample_evaluation")
+  /// Cached TTS of the question text
+  audioKey         String?       @map("audio_key")
+  createdBy        String?       @map("created_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  role             JobRole           @relation(fields: [jobRoleId], references: [id], onDelete: Cascade)
+  card             FlashCard?        @relation(fields: [flashCardId], references: [id], onDelete: SetNull)
+  sessionQuestions SessionQuestion[]
+  attempts         Attempt[]
+
+  @@index([jobRoleId])
+  @@map("questions")
+}
+
+model Session {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @map("user_id") @db.Uuid
+  jobRoleId       String        @map("job_role_id") @db.Uuid
+  /// Per (user, role), 1-based. 1 = baseline.
+  number          Int
+  status          SessionStatus @default(in_progress)
+  mode            AnswerMode
+  isPreview       Boolean       @default(false) @map("is_preview")
+  currentQuestion Int           @default(1) @map("current_question")
+  startedAt       DateTime      @default(now()) @map("started_at")
+  completedAt     DateTime?     @map("completed_at")
+  durationS       Int?          @map("duration_s")
+  firstTryAvg     Float?        @map("first_try_avg")
+  retryAvg        Float?        @map("retry_avg")
+  learningAvg     Float?        @map("learning_avg")
+  score           Int?
+  band            Band?
+  /// {content,structure,delivery,relevance} 0..100
+  skills          Json?
+  /// [{text, cardId}]
+  strengths       Json?
+  /// [{text, cardId}]
+  focusAreas      Json?         @map("focus_areas")
+  bandMessage     String?       @map("band_message")
+  /// {sessionWeights, dimensionWeights}
+  weightsSnapshot Json          @map("weights_snapshot")
+  /// {interviewer, evaluator, summariser} -> version
+  promptVersions  Json          @map("prompt_versions")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       JobRole           @relation(fields: [jobRoleId], references: [id], onDelete: Cascade)
+  questions  SessionQuestion[]
+  attempts   Attempt[]
+  consents   Consent[]
+  flags      EvaluationFlag[]
+  aiCallLogs AiCallLog[]
+
+  @@unique([userId, jobRoleId, number])
+  // Raw SQL: partial unique index, one in_progress per (user_id, job_role_id).
+  @@map("sessions")
+}
+
+model SessionQuestion {
+  sessionId    String  @map("session_id") @db.Uuid
+  questionId   String  @map("question_id") @db.Uuid
+  /// 1-based
+  position     Int
+  retrySkipped Boolean @default(false) @map("retry_skipped")
+  followUpText String? @map("follow_up_text")
+
+  session  Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id])
+
+  @@id([sessionId, position])
+  @@unique([sessionId, questionId])
+  @@map("session_questions")
+}
+
+model Attempt {
+  id               String        @id @default(uuid()) @db.Uuid
+  sessionId        String        @map("session_id") @db.Uuid
+  questionId       String        @map("question_id") @db.Uuid
+  /// 1 | 2
+  attemptNo        Int           @map("attempt_no")
+  mode             AnswerMode
+  status           AttemptStatus @default(received)
+  idempotencyKey   String        @map("idempotency_key")
+  transcript       String?
+  /// [{w, start, end}]
+  words            Json?
+  audioKey         String?       @map("audio_key")
+  audioExpiresAt   DateTime?     @map("audio_expires_at")
+  durationS        Float?        @map("duration_s")
+  wpm              Float?
+  fillerCount      Int?          @map("filler_count")
+  pauseCount       Int?          @map("pause_count")
+  longestPauseS    Float?        @map("longest_pause_s")
+  /// {content,structure,delivery,relevance} 0..100
+  dimensionScores  Json?         @map("dimension_scores")
+  score            Int?
+  learningScore    Int?          @map("learning_score")
+  /// worked, improve, opener, focus, deliveryNotes, applied[], highlights[], spokenSummary, followUp
+  feedback         Json?
+  feedbackText     String?       @map("feedback_text")
+  feedbackAudioKey String?       @map("feedback_audio_key")
+  evidence         Json?
+  error            String?
+  submittedAt      DateTime      @default(now()) @map("submitted_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  session    Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question   Question    @relation(fields: [questionId], references: [id])
+  aiCallLogs AiCallLog[]
+
+  @@unique([sessionId, questionId, attemptNo])
+  @@unique([sessionId, idempotencyKey])
+  @@index([audioExpiresAt])
+  @@map("attempts")
+}
+
+model Consent {
+  id          String   @id @default(uuid()) @db.Uuid
+  sessionId   String   @map("session_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  /// "recording"
+  kind        String
+  textVersion String   @map("text_version")
+  givenAt     DateTime @default(now()) @map("given_at")
+  ip          String?
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("consents")
+}
+
+model EvaluationFlag {
+  id             String     @id @default(uuid()) @db.Uuid
+  sessionId      String     @map("session_id") @db.Uuid
+  questionId     String?    @map("question_id") @db.Uuid
+  questionNumber Int        @map("question_number")
+  /// content|structure|delivery|relevance|overall|feedback
+  dimension      String
+  /// too_high|too_low|feedback_inaccurate|transcript_wrong
+  issue          String
+  note           String?
+  status         FlagStatus @default(open)
+  resolution     String?
+  createdBy      String     @map("created_by") @db.Uuid
+  createdAt      DateTime   @default(now()) @map("created_at")
+  resolvedBy     String?    @map("resolved_by") @db.Uuid
+  resolvedAt     DateTime?  @map("resolved_at")
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("evaluation_flags")
+}
+
+model SavedFilter {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// null = system row
+  adminId   String?  @map("admin_id") @db.Uuid
+  label     String
+  /// CandidateQuery
+  query     Json
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin User? @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@map("saved_filters")
+}
+
+model ActivityEvent {
+  id     String   @id @default(uuid()) @db.Uuid
+  userId String   @map("user_id") @db.Uuid
+  text   String
+  at     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, at])
+  @@map("activity_events")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  itemLabel String   @map("item_label")
+  before    Json?
+  after     Json?
+  ip        String?
+  at        DateTime @default(now())
+
+  @@index([at])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+/// Single row (id = 1). `data` is WorkspaceSettings plus erasureGraceDays.
+model WorkspaceSettings {
+  id        Int      @id @default(1)
+  data      Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("workspace_settings")
+}
+
+model PromptVersion {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// interviewer | evaluator | summariser | drafter
+  role         String
+  version      Int
+  model        String
+  temperature  Float
+  template     String
+  outputSchema Json?    @map("output_schema")
+  active       Boolean  @default(false)
+  createdBy    String?  @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([role, version])
+  @@map("prompt_versions")
+}
+
+model AiCallLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  sessionId     String?  @map("session_id") @db.Uuid
+  attemptId     String?  @map("attempt_id") @db.Uuid
+  /// llm | stt | tts
+  kind          String
+  provider      String
+  model         String?
+  /// prompt role, e.g. "evaluator"
+  promptRole    String?  @map("prompt_role")
+  promptVersion Int?     @map("prompt_version")
+  inputTokens   Int?     @map("input_tokens")
+  outputTokens  Int?     @map("output_tokens")
+  audioSeconds  Float?   @map("audio_seconds")
+  latencyMs     Int      @map("latency_ms")
+  costUsd       Decimal? @map("cost_usd") @db.Decimal(10, 5)
+  /// ok | error
+  status        String
+  error         String?
+  at            DateTime @default(now())
+
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  attempt Attempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@map("ai_call_logs")
+}
+
+model ExportJob {
+  id          String    @id @default(uuid()) @db.Uuid
+  requestedBy String    @map("requested_by") @db.Uuid
+  /// workspace_csv | candidate_json
+  kind        String
+  /// queued | running | done | failed
+  status      String
+  /// For candidate exports: whose data. Cascades on purge.
+  subjectId   String?   @map("subject_id") @db.Uuid
+  fileKey     String?   @map("file_key")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  finishedAt  DateTime? @map("finished_at")
+
+  @@map("export_jobs")
+}
+
+model PrivacyRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  /// export | deletion
+  kind        String
+  /// pending | completed | rejected
+  status      String
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+  completedBy String?   @map("completed_by") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("privacy_requests")
+}
+
+/// Proof of erasure. Holds no personal data.
+model ErasureReceipt {
+  id               String    @id @default(uuid()) @db.Uuid
+  /// The erased user's id, kept so the purge job can find the row. Not personal data once the user row is gone.
+  subjectId        String    @map("subject_id") @db.Uuid
+  emailSha256      String    @map("email_sha256")
+  requestedBy      String    @map("requested_by") @db.Uuid
+  requestedAt      DateTime  @map("requested_at")
+  hiddenAt         DateTime  @map("hidden_at")
+  purgeAfter       DateTime  @map("purge_after")
+  purgedAt         DateTime? @map("purged_at")
+  s3ObjectsDeleted Int?      @map("s3_objects_deleted")
+
+  @@index([purgeAfter])
+  @@map("erasure_receipts")
+}
