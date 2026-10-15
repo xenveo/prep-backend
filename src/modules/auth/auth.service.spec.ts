@@ -73,7 +73,12 @@ function setup() {
   const email = { send: vi.fn() };
   const activity = { record: vi.fn() };
   const settings = {
-    get: vi.fn().mockResolvedValue({ audioRetentionDays: 30 }),
+    get: vi
+      .fn()
+      .mockResolvedValue({
+        audioRetentionDays: 30,
+        candidatesCanDeleteData: true,
+      }),
   };
   const service = new AuthService(
     prisma as unknown as PrismaService,
@@ -83,7 +88,7 @@ function setup() {
     activity as unknown as ActivityService,
     settings as unknown as SettingsService,
   );
-  return { service, prisma, tx, rateLimiter, email, activity };
+  return { service, prisma, tx, rateLimiter, email, activity, settings };
 }
 
 describe('AuthService', () => {
@@ -360,7 +365,29 @@ describe('AuthService', () => {
       role: 'candidate',
       accessExpiresAt: '2027-01-01T00:00:00.000Z',
       audioRetentionDays: 30,
+      candidatesCanDeleteData: true,
     });
+  });
+
+  it('projects disabled deletion policy without exposing other workspace settings', async () => {
+    const { service, settings } = setup();
+    const workspace = {
+      audioRetentionDays: 30,
+      candidatesCanDeleteData: false,
+      providerSecret: 'not-for-candidates',
+    };
+    settings.get.mockResolvedValue(workspace);
+    const response = await service.me({
+      id: 'u1',
+      email: EMAIL,
+      name: null,
+      role: 'candidate',
+      status: 'active',
+      accessExpiresAt: null,
+      authSessionId: 'as1',
+    });
+    expect(response.candidatesCanDeleteData).toBe(false);
+    expect(response).not.toHaveProperty('providerSecret');
   });
 
   it('adminMe returns the admin UI Admin shape', async () => {

@@ -3,6 +3,7 @@ import { AiModule } from '../ai/ai.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { AdminContentController } from './admin-content.controller.js';
 import { AiDraftProcessor } from './ai-draft.processor.js';
+import { AiJobsController } from './ai-jobs.controller.js';
 import { AiQuotaService } from './ai-quota.service.js';
 import { CandidateCardsController } from './candidate-cards.controller.js';
 import { CandidateCardsService } from './candidate-cards.service.js';
@@ -16,7 +17,11 @@ import { TtsPregenProcessor } from './tts-pregen.processor.js';
 /** Job roles, flash cards and question banks (plan M2, M4, M7). */
 @Module({
   imports: [AiModule, UsersModule],
-  controllers: [AdminContentController, CandidateCardsController],
+  controllers: [
+    AdminContentController,
+    AiJobsController,
+    CandidateCardsController,
+  ],
   providers: [
     RolesService,
     CardsService,

@@ -25,7 +25,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start:worker": "node dist/worker",
+    "start:worker": "node dist/worker.js",
     "start:worker:dev": "nest start --watch --entryFile worker",
     "prisma:seed": "prisma db seed",
     "prisma:deploy": "prisma migrate deploy"

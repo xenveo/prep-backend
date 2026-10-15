@@ -108,7 +108,8 @@ export class AuthService {
   }
 
   async me(user: AuthUser): Promise<MeResponse> {
-    const { audioRetentionDays } = await this.settings.get();
+    const { audioRetentionDays, candidatesCanDeleteData } =
+      await this.settings.get();
     return {
       id: user.id,
       email: user.email,
@@ -117,6 +118,7 @@ export class AuthService {
       role: user.role,
       accessExpiresAt: user.accessExpiresAt?.toISOString() ?? null,
       audioRetentionDays,
+      candidatesCanDeleteData,
     };
   }
 

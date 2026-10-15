@@ -3,16 +3,14 @@ import { Queue, QueueEvents, Worker, type JobsOptions } from 'bullmq';
 import type { Env } from '../../config/env.js';
 import type { RedisService } from '../infra/redis.service.js';
 import { assertJobId } from './job-id.js';
+import { JOB_OUTCOME_LIMIT, JOB_OUTCOME_TTL_MS } from './queue.types.js';
 import type {
   JobHandler,
   JobOptions,
+  QueueJob,
   QueueName,
   QueueService,
 } from './queue.types.js';
-
-/** Completed jobs kept for dedupe and debugging; failed ones kept a day. Payloads may hold emails. */
-const KEEP_COMPLETED = 100;
-const KEEP_FAILED_SEC = 24 * 3600;
 
 /** Redis-backed QueueService (plan §8). Workers only start where PROCESS_ROLE is `worker` or `all`. */
 export class BullMqQueueService implements QueueService, OnModuleDestroy {
@@ -31,7 +29,11 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
     data: T,
     opts: JobOptions = {},
   ): Promise<{ jobId: string }> {
-    const job = await this.queue(queue).add(queue, data, this.jobOptions(opts));
+    const job = await this.queue(queue).add(
+      queue,
+      data,
+      this.jobOptions(queue, opts),
+    );
     return { jobId: job.id! };
   }
 
@@ -43,7 +45,11 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
   ): Promise<{ done: true; result: R } | { done: false; jobId: string }> {
     const events = this.queueEvents(queue);
     await events.waitUntilReady();
-    const job = await this.queue(queue).add(queue, data, this.jobOptions(opts));
+    const job = await this.queue(queue).add(
+      queue,
+      data,
+      this.jobOptions(queue, opts),
+    );
     const jobId = job.id!;
 
     // The ttl outlives our own timer so the race below always resolves through it; the late
@@ -61,6 +67,39 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async getJob<T = unknown, R = unknown>(
+    queue: QueueName,
+    id: string,
+  ): Promise<QueueJob<T, R> | null> {
+    const job = await this.queue(queue).getJob(id);
+    if (!job) return null;
+    const status = await job.getState();
+    if (status === 'unknown') return null;
+    // BullMQ age cleanup runs lazily on completion. Enforce expiry on reads too.
+    if (status === 'completed' || status === 'failed') {
+      // getState reads Redis after getJob hydrated its snapshot. A worker may have finished
+      // between those calls, so reload terminal fields before returning status/results.
+      const terminal = await this.queue(queue).getJob(id);
+      if (
+        !terminal ||
+        terminal.finishedOn === undefined ||
+        terminal.finishedOn + JOB_OUTCOME_TTL_MS <= Date.now()
+      )
+        return null;
+      return status === 'completed'
+        ? {
+            data: terminal.data as T,
+            status: 'done',
+            result: terminal.returnvalue as R,
+          }
+        : { data: terminal.data as T, status: 'failed' };
+    }
+    return {
+      data: job.data as T,
+      status: status === 'active' ? 'running' : 'queued',
+    };
   }
 
   process<T, R>(
@@ -120,15 +159,21 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
     );
   }
 
-  private jobOptions(opts: JobOptions): JobsOptions {
+  private jobOptions(queue: QueueName, opts: JobOptions): JobsOptions {
     assertJobId(opts.jobId);
     return {
       jobId: opts.jobId,
       delay: opts.delayMs,
       attempts: Math.max(1, opts.attempts ?? 1),
       backoff: { type: 'exponential', delay: opts.backoffMs ?? 1000 },
-      removeOnComplete: { count: KEEP_COMPLETED },
-      removeOnFail: { age: KEEP_FAILED_SEC },
+      removeOnComplete:
+        queue === 'ai-draft'
+          ? { age: JOB_OUTCOME_TTL_MS / 1000, count: JOB_OUTCOME_LIMIT }
+          : { count: 100 },
+      removeOnFail:
+        queue === 'ai-draft'
+          ? { age: JOB_OUTCOME_TTL_MS / 1000, count: JOB_OUTCOME_LIMIT }
+          : { age: 24 * 3600 },
     };
   }
 

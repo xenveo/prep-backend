@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { Logger, OnModuleDestroy } from '@nestjs/common';
 import type { Env } from '../../config/env.js';
 import { assertJobId } from './job-id.js';
+import { JOB_OUTCOME_LIMIT, JOB_OUTCOME_TTL_MS } from './queue.types.js';
 import type {
   JobHandler,
   JobOptions,
+  QueueJob,
   QueueName,
   QueueService,
 } from './queue.types.js';
@@ -29,6 +31,10 @@ type QueueState = {
   ready: Job[];
   /** Every pending job (waiting, delayed or running), for jobId dedupe. */
   jobs: Map<string, Job>;
+  outcomes: Map<
+    string,
+    { job: QueueJob; finishedAt: number; timer: NodeJS.Timeout }
+  >;
 };
 
 /**
@@ -73,6 +79,22 @@ export class InMemoryQueueService implements QueueService, OnModuleDestroy {
     });
   }
 
+  async getJob<T = unknown, R = unknown>(
+    queue: QueueName,
+    id: string,
+  ): Promise<QueueJob<T, R> | null> {
+    const state = this.state(queue);
+    this.pruneOutcomes(state);
+    const pending = state.jobs.get(id);
+    if (pending) {
+      return {
+        data: pending.data as T,
+        status: pending.state === 'running' ? 'running' : 'queued',
+      };
+    }
+    return (state.outcomes.get(id)?.job as QueueJob<T, R> | undefined) ?? null;
+  }
+
   process<T, R>(
     queue: QueueName,
     handler: JobHandler<T, R>,
@@ -113,6 +135,9 @@ export class InMemoryQueueService implements QueueService, OnModuleDestroy {
       for (const job of state.jobs.values())
         if (job.timer) clearTimeout(job.timer);
       state.jobs.clear();
+      for (const outcome of state.outcomes.values())
+        clearTimeout(outcome.timer);
+      state.outcomes.clear();
       state.ready = [];
     }
     this.checkIdle();
@@ -124,6 +149,9 @@ export class InMemoryQueueService implements QueueService, OnModuleDestroy {
     const id = opts.jobId ?? randomUUID();
     const existing = state.jobs.get(id);
     if (existing) return existing;
+    // Preserve pending-only dedupe: a new job with this id replaces the previous outcome.
+    this.removeOutcome(state, id);
+    this.pruneOutcomes(state);
 
     const job: Job = {
       id,
@@ -201,7 +229,23 @@ export class InMemoryQueueService implements QueueService, OnModuleDestroy {
     if (this.destroyed) return this.checkIdle();
     if (outcome) {
       state.jobs.delete(job.id);
+      if (queue === 'ai-draft') {
+        const timer = setTimeout(
+          () => state.outcomes.delete(job.id),
+          JOB_OUTCOME_TTL_MS,
+        );
+        timer.unref();
+        state.outcomes.set(job.id, {
+          job: outcome.ok
+            ? { data: job.data, status: 'done', result: outcome.result }
+            : { data: job.data, status: 'failed' },
+          finishedAt: Date.now(),
+          timer,
+        });
+        this.pruneOutcomes(state);
+      }
       for (const listener of job.listeners) listener(outcome);
+      job.listeners = [];
     } else {
       this.delay(queue, job, job.backoffMs * 2 ** (job.attempt - 1));
     }
@@ -218,10 +262,30 @@ export class InMemoryQueueService implements QueueService, OnModuleDestroy {
         running: 0,
         ready: [],
         jobs: new Map(),
+        outcomes: new Map(),
       };
       this.queues.set(queue, state);
     }
     return state;
+  }
+
+  /** Retain the latest 100 completed and 100 failed AI drafts, for at most 24 hours. */
+  private pruneOutcomes(state: QueueState): void {
+    const counts = { done: 0, failed: 0 };
+    for (const [id, outcome] of [...state.outcomes].reverse()) {
+      const status = outcome.job.status as 'done' | 'failed';
+      if (
+        outcome.finishedAt + JOB_OUTCOME_TTL_MS <= Date.now() ||
+        ++counts[status] > JOB_OUTCOME_LIMIT
+      )
+        this.removeOutcome(state, id);
+    }
+  }
+
+  private removeOutcome(state: QueueState, id: string): void {
+    const outcome = state.outcomes.get(id);
+    if (outcome) clearTimeout(outcome.timer);
+    state.outcomes.delete(id);
   }
 
   private isIdle(): boolean {

@@ -1,4 +1,6 @@
 import { InMemoryQueueService } from './in-memory-queue.service.js';
+import { Logger } from '@nestjs/common';
+import { JOB_OUTCOME_LIMIT, JOB_OUTCOME_TTL_MS } from './queue.types.js';
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -12,6 +14,7 @@ describe('InMemoryQueueService', () => {
   afterEach(() => {
     queue.onModuleDestroy();
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('runs a job asynchronously, never inside add', async () => {
@@ -187,5 +190,122 @@ describe('InMemoryQueueService', () => {
   it('refuses a second processor for the same queue', () => {
     queue.process('email', async () => undefined);
     expect(() => queue.process('email', async () => undefined)).toThrow();
+  });
+
+  it('exposes queued, running, and completed jobs without removing results on drain', async () => {
+    const data = { adminId: 'admin-1' };
+    const { jobId } = await queue.add('ai-draft', data);
+    await expect(queue.getJob('ai-draft', jobId)).resolves.toEqual({
+      status: 'queued',
+      data,
+    });
+    let finish!: (result: unknown[]) => void;
+    queue.process(
+      'ai-draft',
+      async () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await tick();
+    await expect(queue.getJob('ai-draft', jobId)).resolves.toEqual({
+      status: 'running',
+      data,
+    });
+    const result = [{ id: 'card-1' }];
+    finish(result);
+    await queue.drain();
+    await expect(queue.getJob('ai-draft', jobId)).resolves.toEqual({
+      status: 'done',
+      data,
+      result,
+    });
+    await expect(queue.getJob('ai-draft', 'unknown')).resolves.toBeNull();
+  });
+
+  it('shows retries as queued and retains final failures without error messages', async () => {
+    vi.useFakeTimers();
+    const data = { adminId: 'admin-1' };
+    queue.process('ai-draft', async () => {
+      throw new Error('private provider details');
+    });
+    const { jobId } = await queue.add('ai-draft', data, {
+      attempts: 2,
+      backoffMs: 100,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(queue.getJob('ai-draft', jobId)).resolves.toEqual({
+      status: 'queued',
+      data,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await queue.drain();
+    await expect(queue.getJob('ai-draft', jobId)).resolves.toEqual({
+      status: 'failed',
+      data,
+    });
+  });
+
+  it('expires completed and failed outcomes after 24 hours', async () => {
+    vi.useFakeTimers();
+    queue.process('ai-draft', async (fail: boolean) => {
+      if (fail) throw new Error('unavailable');
+      return [];
+    });
+    const completed = await queue.add('ai-draft', false);
+    const failed = await queue.add('ai-draft', true);
+    await vi.advanceTimersByTimeAsync(0);
+    await queue.drain();
+    expect(vi.getTimerCount()).toBe(2);
+    await vi.advanceTimersByTimeAsync(JOB_OUTCOME_TTL_MS - 1);
+    expect((await queue.getJob('ai-draft', completed.jobId))?.status).toBe(
+      'done',
+    );
+    expect((await queue.getJob('ai-draft', failed.jobId))?.status).toBe(
+      'failed',
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(queue.getJob('ai-draft', completed.jobId)).resolves.toBeNull();
+    await expect(queue.getJob('ai-draft', failed.jobId)).resolves.toBeNull();
+  });
+
+  it.each([false, true])(
+    'bounds retained outcomes per terminal status (failure=%s)',
+    async (fail) => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      queue.process('ai-draft', async () => {
+        if (fail) throw new Error('unavailable');
+        return [];
+      });
+      for (let index = 0; index <= JOB_OUTCOME_LIMIT; index++) {
+        await queue.add('ai-draft', {}, { jobId: `draft-${index}` });
+      }
+      await queue.drain();
+      await expect(queue.getJob('ai-draft', 'draft-0')).resolves.toBeNull();
+      expect(
+        (await queue.getJob('ai-draft', `draft-${JOB_OUTCOME_LIMIT}`))?.status,
+      ).toBe(fail ? 'failed' : 'done');
+    },
+  );
+
+  it.each(['email', 'attempt', 'export'] as const)(
+    'does not retain terminal %s payloads',
+    async (name) => {
+      queue.process(name, async () => ({ privateResult: 'personal data' }));
+      const { jobId } = await queue.add(name, {
+        privateInput: 'personal data',
+      });
+      await queue.drain();
+      await expect(queue.getJob(name, jobId)).resolves.toBeNull();
+    },
+  );
+
+  it('removes completed outcomes on shutdown', async () => {
+    queue.process('ai-draft', async () => []);
+    const { jobId } = await queue.add('ai-draft', {});
+    await queue.drain();
+    queue.onModuleDestroy();
+    await expect(queue.getJob('ai-draft', jobId)).resolves.toBeNull();
   });
 });

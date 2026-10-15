@@ -31,6 +31,7 @@ export type MeResponse = {
   role: 'candidate' | 'admin' | 'super_admin';
   accessExpiresAt: string | null;
   audioRetentionDays: 7 | 30 | 90;
+  candidatesCanDeleteData: boolean;
 };
 
 /** Admin UI `Admin` (src/lib/types.ts). */
