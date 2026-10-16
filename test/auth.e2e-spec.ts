@@ -306,6 +306,54 @@ describe('Auth (e2e)', () => {
     });
   });
 
+  it('the admin app has its own cookie, so signing in to one app keeps the other signed in', async () => {
+    const adminOrigin = process.env.APP_ADMIN_ORIGIN!;
+    const candidate = await createUser('both-cand', { status: 'active' });
+    const admin = await createUser('both-admin', {
+      role: 'admin',
+      status: 'active',
+    });
+    const candidateCookie = await login(candidate.email);
+
+    await requestCode(admin.email);
+    const res = await http()
+      .post('/api/auth/verify')
+      .set('Origin', adminOrigin)
+      .send({ email: admin.email, code: lastCodeFor(admin.email) })
+      .expect(200);
+    const adminCookie = ([] as string[])
+      .concat(res.headers['set-cookie'] ?? [])
+      .find((c) => c.startsWith('pp_admin_session='))
+      ?.split(';')[0];
+    expect(adminCookie).toBeDefined();
+
+    // One browser cookie jar holding both logins (SESSION_COOKIE_DOMAIN).
+    const jar = `${candidateCookie}; ${adminCookie}`;
+    const me = await http().get('/api/me').set('Cookie', jar).expect(200);
+    expect(me.body.id).toBe(candidate.id);
+    const adminMe = await http()
+      .get('/api/admin/me')
+      .set('Cookie', jar)
+      .set('Origin', adminOrigin)
+      .expect(200);
+    expect(adminMe.body.id).toBe(admin.id);
+    // The admin app's server rendering has no Origin; it names itself instead.
+    await http()
+      .get('/api/admin/me')
+      .set('Cookie', jar)
+      .set('X-PrepPilot-App', 'admin')
+      .expect(200);
+
+    // Logging out of the admin app clears only its cookie.
+    const out = await http()
+      .post('/api/auth/logout')
+      .set('Cookie', jar)
+      .set('Origin', adminOrigin)
+      .expect(204);
+    expect(String(out.headers['set-cookie'])).toMatch(/^pp_admin_session=;/);
+    await http().get('/api/me').set('Cookie', jar).expect(200);
+  });
+
   it('logout, deactivation and access expiry end the session', async () => {
     const a = await createUser('logout', { status: 'active' });
     const cookieA = await login(a.email);

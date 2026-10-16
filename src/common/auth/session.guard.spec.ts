@@ -40,6 +40,8 @@ function makeSession(over: { session?: object; user?: object } = {}) {
   };
 }
 
+const ADMIN_ORIGIN = 'https://prep-admin.xenveo.com';
+
 describe('SessionGuard', () => {
   let prisma: {
     authSession: {
@@ -67,13 +69,18 @@ describe('SessionGuard', () => {
     guard = new SessionGuard(
       reflector,
       prisma as unknown as PrismaService,
-      { env: { SESSION_TTL_DAYS: 7 } } as unknown as AppConfig,
+      {
+        env: { SESSION_TTL_DAYS: 7, APP_ADMIN_ORIGIN: ADMIN_ORIGIN },
+      } as unknown as AppConfig,
     );
   });
 
   afterEach(() => vi.useRealTimers());
 
-  const run = (req: Partial<AuthedRequest>) => guard.canActivate(context(req));
+  const run = (req: Partial<AuthedRequest>) => {
+    req.headers ??= {};
+    return guard.canActivate(context(req));
+  };
   const withCookie = (): Partial<AuthedRequest> => ({
     cookies: { pp_session: 'tok' },
   });
@@ -137,6 +144,24 @@ describe('SessionGuard', () => {
       authSessionId: 'as1',
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("reads the admin app's own cookie for requests from the admin origin", async () => {
+    prisma.authSession.findUnique.mockResolvedValue(makeSession());
+    const cookies = {
+      pp_session: 'candidate-tok',
+      pp_admin_session: 'admin-tok',
+    };
+    await run({ cookies, headers: { origin: ADMIN_ORIGIN } });
+    await run({ cookies, headers: { 'x-preppilot-app': 'admin' } });
+    await run({ cookies, headers: { origin: 'https://prep.xenveo.com' } });
+    expect(
+      prisma.authSession.findUnique.mock.calls.map((c) => c[0].where.tokenHash),
+    ).toEqual([
+      sha256Hex('admin-tok'),
+      sha256Hex('admin-tok'),
+      sha256Hex('candidate-tok'),
+    ]);
   });
 
   it('slides the expiry and touches lastActiveAt after 5 minutes', async () => {

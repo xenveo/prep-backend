@@ -37,9 +37,9 @@ const env = {
   APP_ADMIN_ORIGIN: 'https://prep-admin.xenveo.com',
   // The frontends' servers read the session cookie, so it must cover their hosts too.
   SESSION_COOKIE_DOMAIN: 'xenveo.com',
-  // Any login code works, but only for these emails; everyone else needs the emailed code.
+  // Any login code works only for this one super admin; everyone else needs the emailed code.
   AUTH_DEV_ACCEPT_ANY_CODE: 'true',
-  AUTH_DEV_ANY_CODE_ALLOWLIST: '@atrox.io',
+  AUTH_DEV_ANY_CODE_ALLOWLIST: 'superadmin@xenveo.com',
   // Cloudflare -> nginx -> app: the client IP is two hops back.
   TRUST_PROXY: '2',
   // pino-pretty is a dev dependency; production logs are JSON.
