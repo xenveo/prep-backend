@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
-import { sessionCookieName } from '../../../common/auth/session-cookie.js';
+import { SESSION_COOKIE } from '../../../common/auth/auth.types.js';
 import { sha256Hex } from '../../../common/crypto.js';
 import {
   EVENT_BUS,
@@ -77,16 +77,14 @@ export type UpgradeAuth =
   | { ok: false; status: 401 | 403 | 404 };
 
 /**
- * Authorizes a WS upgrade: Origin allow-list (cross-site WebSocket hijacking), the app's login
- * cookie (sessionCookieName) checked like SessionGuard, and ownership of the interview session.
+ * Authorizes a WS upgrade: Origin allow-list (cross-site WebSocket hijacking), the `pp_session`
+ * cookie checked like SessionGuard, and ownership of the interview session.
  */
 export async function authorizeUpgrade(
   req: Pick<IncomingMessage, 'url' | 'headers'>,
   deps: {
     prisma: Pick<PrismaService, 'authSession' | 'session'>;
     allowedOrigins: string[];
-    /** APP_ADMIN_ORIGIN: picks the admin app's login cookie. */
-    adminOrigin: string;
     now?: Date;
   },
 ): Promise<UpgradeAuth> {
@@ -102,10 +100,7 @@ export async function authorizeUpgrade(
     if (!o || !allowed.has(o)) return { ok: false, status: 403 };
   }
 
-  const token = parseCookie(
-    req.headers.cookie,
-    sessionCookieName(req.headers, deps.adminOrigin),
-  );
+  const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
   if (!token) return { ok: false, status: 401 };
   const auth = await deps.prisma.authSession.findUnique({
     where: { tokenHash: sha256Hex(token) },
@@ -225,7 +220,6 @@ export class SessionGateway
         env.APP_ADMIN_ORIGIN,
         env.PUBLIC_API_URL,
       ],
-      adminOrigin: env.APP_ADMIN_ORIGIN,
     })
       .then((auth) => {
         if (!auth.ok) return reject(socket, auth.status);

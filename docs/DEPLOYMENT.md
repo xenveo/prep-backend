@@ -204,12 +204,9 @@ names the variable (never its value). Variables marked *(secret)* belong in the 
 ## 8. Domains, reverse proxy, cookies and CORS
 
 - **Domains:** put the API and both apps under one parent domain, e.g. `api.example.com`,
-  `app.example.com` and `admin.example.com`. The session cookies (`HttpOnly`, `Secure`,
-  `SameSite=Lax`) are set for `SESSION_COOKIE_DOMAIN=.example.com`, so the apps' server rendering can
-  forward them. Each app has its own cookie, so signing in to one doesn't sign the other out:
-  `pp_session` for the candidate app and `pp_admin_session` for the admin app. The API picks the
-  admin cookie for requests whose Origin (or Referer) is `APP_ADMIN_ORIGIN`, and for the admin
-  app's server rendering, which sends `X-PrepPilot-App: admin`. The API's `Cross-Origin-Resource-Policy: same-site` header also assumes one site:
+  `app.example.com` and `admin.example.com`. The session cookie (`pp_session`, `HttpOnly`, `Secure`,
+  `SameSite=Lax`) is set for `SESSION_COOKIE_DOMAIN=.example.com`, so the apps' server rendering can
+  forward it. The API's `Cross-Origin-Resource-Policy: same-site` header also assumes one site:
   API-served resources from another registrable domain would be blocked.
 - **CORS:** only `APP_CANDIDATE_ORIGIN` and `APP_ADMIN_ORIGIN`, exact, scheme included, no trailing slash.
 - **TLS** ends at the reverse proxy. Set `TRUST_PROXY=1` so `req.ip` is the client, not the proxy.

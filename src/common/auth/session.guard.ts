@@ -8,9 +8,8 @@ import { AppConfig } from '../../config/app-config.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { sha256Hex } from '../crypto.js';
 import { AppError } from '../errors/app-error.js';
-import type { AuthedRequest } from './auth.types.js';
+import { type AuthedRequest, SESSION_COOKIE } from './auth.types.js';
 import { IS_PUBLIC_KEY } from './public.decorator.js';
-import { sessionCookieName } from './session-cookie.js';
 
 const SLIDE_EVERY_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -18,10 +17,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const unauthenticated = () =>
   new AppError('unauthenticated', 401, 'Please sign in');
 
-/**
- * Global guard: resolves the app's login cookie (`pp_session`, or `pp_admin_session` from the admin
- * app; see sessionCookieName) to `req.user`, sliding the session expiry (FR-AUTH-04).
- */
+/** Global guard: resolves the `pp_session` cookie to `req.user`, sliding the session expiry (FR-AUTH-04). */
 @Injectable()
 export class SessionGuard implements CanActivate {
   constructor(
@@ -39,11 +35,7 @@ export class SessionGuard implements CanActivate {
     if (isPublic) return true;
 
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const cookie = sessionCookieName(
-      req.headers,
-      this.config.env.APP_ADMIN_ORIGIN,
-    );
-    const token: unknown = req.cookies?.[cookie];
+    const token: unknown = req.cookies?.[SESSION_COOKIE];
     if (typeof token !== 'string' || !token) throw unauthenticated();
 
     const session = await this.prisma.authSession.findUnique({
