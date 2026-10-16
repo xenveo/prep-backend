@@ -10,6 +10,23 @@ describe('loadConfig', () => {
     expect(env.LOG_PRETTY).toBe(false);
   });
 
+  it('allows AUTH_DEV_ACCEPT_ANY_CODE in production only with an allowlist', () => {
+    const prod = {
+      ...base,
+      NODE_ENV: 'production',
+      AUTH_DEV_ACCEPT_ANY_CODE: 'true',
+    };
+    expect(() => loadConfig(prod)).toThrow(/AUTH_DEV_ACCEPT_ANY_CODE/);
+    const { env } = loadConfig({
+      ...prod,
+      AUTH_DEV_ANY_CODE_ALLOWLIST: 'Team@Acme.com, @acme.io',
+    });
+    expect(env.AUTH_DEV_ANY_CODE_ALLOWLIST).toEqual([
+      'team@acme.com',
+      '@acme.io',
+    ]);
+  });
+
   it('names invalid variables without echoing secret values', () => {
     const secret = 'short-secret';
     expect(() =>

@@ -7,6 +7,17 @@ const bool = z
   .default('false')
   .transform((v) => v === 'true');
 
+/** Comma-separated addresses or "@domain" suffixes, lowercased. */
+const emailList = z
+  .string()
+  .optional()
+  .transform((v) =>
+    (v ?? '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
 export const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
@@ -57,8 +68,10 @@ export const envSchema = z.object({
   OTP_REQUESTS_PER_HOUR: z.coerce.number().int().default(5),
   OTP_IP_REQUESTS_PER_HOUR: z.coerce.number().int().default(20),
   OTP_RESEND_COOLDOWN_SEC: z.coerce.number().int().default(30),
-  /** Dev only: any well-formed code logs in an eligible user. Refused when NODE_ENV=production. */
+  /** Any well-formed code logs in an eligible user. In production only with AUTH_DEV_ANY_CODE_ALLOWLIST. */
   AUTH_DEV_ACCEPT_ANY_CODE: bool,
+  /** Emails AUTH_DEV_ACCEPT_ANY_CODE applies to (addresses or "@domain"); empty = everyone. Required in production. */
+  AUTH_DEV_ANY_CODE_ALLOWLIST: emailList,
   AI_ADMIN_CALLS_PER_HOUR: z.coerce.number().int().default(30),
 
   LLM_PROVIDER: z.enum(['gemini', 'anthropic', 'fake']).default('fake'),
@@ -79,15 +92,7 @@ export const envSchema = z.object({
   MAIL_FROM: z.string().default('no-reply@preppilot.local'),
   RESEND_API_KEY: z.string().optional(),
   /** Comma-separated addresses or "@domain" suffixes. When set, only these recipients get real mail; the rest go to the console outbox. */
-  MAIL_ALLOWLIST: z
-    .string()
-    .optional()
-    .transform((v) =>
-      (v ?? '')
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean),
-    ),
+  MAIL_ALLOWLIST: emailList,
   /** Provider send rate; the email queue is limited to it. */
   MAIL_RATE_PER_SECOND: z.coerce.number().int().min(1).default(2),
   SES_REGION: z.string().default('ap-south-1'),
@@ -99,9 +104,14 @@ export const envSchema = z.object({
   SENTRY_DSN: z.string().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 }).refine(
-  (env) => !(env.AUTH_DEV_ACCEPT_ANY_CODE && env.NODE_ENV === 'production'),
+  (env) =>
+    !(
+      env.AUTH_DEV_ACCEPT_ANY_CODE &&
+      env.NODE_ENV === 'production' &&
+      !env.AUTH_DEV_ANY_CODE_ALLOWLIST.length
+    ),
   {
-    message: 'must not be true in production',
+    message: 'needs AUTH_DEV_ANY_CODE_ALLOWLIST in production',
     path: ['AUTH_DEV_ACCEPT_ANY_CODE'],
   },
 );

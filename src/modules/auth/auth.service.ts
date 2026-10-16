@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { isAllowlisted } from '../../adapters/mail/resend-mail.adapter.js';
 import type { AuthUser } from '../../common/auth/auth.types.js';
 import {
   hmacHex,
@@ -45,7 +46,12 @@ export class AuthService {
     private readonly email: EmailService,
     private readonly activity: ActivityService,
     private readonly settings: SettingsService,
-  ) {}
+  ) {
+    if (config.env.AUTH_DEV_ACCEPT_ANY_CODE)
+      this.logger.warn(
+        'AUTH_DEV_ACCEPT_ANY_CODE is on: login codes are not checked for allowlisted emails',
+      );
+  }
 
   /** Always `sent` unless rate-limited, so the response never reveals who is invited (FR-AUTH-03). */
   async requestCode(email: string, ip: string): Promise<RequestCodeResponse> {
@@ -155,7 +161,11 @@ export class AuthService {
     code: string,
   ): Promise<VerifyOutcome> {
     const now = new Date();
-    if (this.config.env.AUTH_DEV_ACCEPT_ANY_CODE)
+    const env = this.config.env;
+    if (
+      env.AUTH_DEV_ACCEPT_ANY_CODE &&
+      isAllowlisted(email, env.AUTH_DEV_ANY_CODE_ALLOWLIST)
+    )
       return this.verifyAnyCode(email, now);
     const authCode = await this.prisma.authCode.findFirst({
       where: { email, usedAt: null, expiresAt: { gt: now } },

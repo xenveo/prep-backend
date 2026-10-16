@@ -20,6 +20,7 @@ const env = {
   OTP_IP_REQUESTS_PER_HOUR: 20,
   OTP_RESEND_COOLDOWN_SEC: 30,
   SESSION_TTL_DAYS: 7,
+  AUTH_DEV_ANY_CODE_ALLOWLIST: [],
 };
 
 const user = (over: object = {}) => ({
@@ -306,6 +307,30 @@ describe('AuthService', () => {
         where: { email: EMAIL, usedAt: null },
         data: { usedAt: NOW },
       });
+      expect(tx.authSession.create).toHaveBeenCalled();
+    });
+
+    it('only skips the code check for allowlisted emails', async () => {
+      const { service, prisma, tx } = setup({
+        AUTH_DEV_ACCEPT_ANY_CODE: true,
+        AUTH_DEV_ANY_CODE_ALLOWLIST: ['@acme.com'],
+      });
+      prisma.user.findUnique.mockResolvedValue(user());
+      await expect(
+        service.verify({ email: EMAIL, code: '000000' }),
+      ).resolves.toMatchObject({ result: 'ok' });
+      expect(prisma.authCode.findFirst).not.toHaveBeenCalled();
+
+      const other = setup({
+        AUTH_DEV_ACCEPT_ANY_CODE: true,
+        AUTH_DEV_ANY_CODE_ALLOWLIST: ['@other.com'],
+      });
+      other.prisma.user.findUnique.mockResolvedValue(user());
+      await expect(
+        other.service.verify({ email: EMAIL, code: '000000' }),
+      ).resolves.toEqual({ result: 'expired' });
+      expect(other.prisma.authCode.findFirst).toHaveBeenCalled();
+      expect(other.tx.authSession.create).not.toHaveBeenCalled();
       expect(tx.authSession.create).toHaveBeenCalled();
     });
 
