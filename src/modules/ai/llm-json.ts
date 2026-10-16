@@ -67,6 +67,7 @@ export async function requestValidated<T>(
         messages: [...messages],
         jsonSchema,
         maxTokens: call.maxTokens,
+        thinkingLevel: call.prompt.thinkingLevel ?? undefined,
       });
     } catch (err) {
       const error =

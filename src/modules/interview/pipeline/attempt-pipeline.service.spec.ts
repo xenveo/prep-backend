@@ -47,6 +47,7 @@ function attemptRow(over: Partial<Attempt> = {}): Attempt {
     fillerCount: null,
     pauseCount: null,
     longestPauseS: null,
+    speakingS: null,
     dimensionScores: null,
     score: null,
     learningScore: null,

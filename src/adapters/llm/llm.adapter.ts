@@ -2,6 +2,9 @@
 
 export const LLM_ADAPTER = Symbol('LLM_ADAPTER');
 
+export const THINKING_LEVELS = ['low', 'medium', 'high'] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 export type LlmMessage = { role: 'user' | 'assistant'; content: string };
 
 export type LlmJsonRequest = {
@@ -14,6 +17,8 @@ export type LlmJsonRequest = {
   /** JSON Schema the output must follow (from z.toJSONSchema). The caller still validates with Zod. */
   jsonSchema: Record<string, unknown>;
   maxTokens?: number;
+  /** From the prompt version. Adapters without thinking levels ignore it; omitted = the model's default. */
+  thinkingLevel?: ThinkingLevel;
 };
 
 export type LlmUsage = { inputTokens: number; outputTokens: number; latencyMs: number; costUsd: number | null };

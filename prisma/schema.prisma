@@ -382,6 +382,8 @@ model Attempt {
   fillerCount      Int?          @map("filler_count")
   pauseCount       Int?          @map("pause_count")
   longestPauseS    Float?        @map("longest_pause_s")
+  /// Speaking time measured in the browser while recording (excludes pauses)
+  speakingS        Float?        @map("speaking_s")
   /// {content,structure,delivery,relevance} 0..100
   dimensionScores  Json?         @map("dimension_scores")
   score            Int?
@@ -498,17 +500,19 @@ model WorkspaceSettings {
 }
 
 model PromptVersion {
-  id           String   @id @default(uuid()) @db.Uuid
+  id            String   @id @default(uuid()) @db.Uuid
   /// interviewer | evaluator | summariser | drafter
-  role         String
-  version      Int
-  model        String
-  temperature  Float
-  template     String
-  outputSchema Json?    @map("output_schema")
-  active       Boolean  @default(false)
-  createdBy    String?  @map("created_by") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at")
+  role          String
+  version       Int
+  model         String
+  temperature   Float
+  template      String
+  outputSchema  Json?    @map("output_schema")
+  /// low | medium | high; null = the model's default. Providers without thinking levels ignore it.
+  thinkingLevel String?  @map("thinking_level")
+  active        Boolean  @default(false)
+  createdBy     String?  @map("created_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@unique([role, version])
   @@map("prompt_versions")

@@ -2,8 +2,10 @@ import { join } from 'node:path';
 import { Global, Module, type Provider } from '@nestjs/common';
 import { AppConfig } from '../config/app-config.js';
 import type { Env } from '../config/env.js';
+import { GeminiClient } from './gemini/gemini.client.js';
 import { AnthropicLlmAdapter } from './llm/anthropic-llm.adapter.js';
 import { FakeLlmAdapter } from './llm/fake-llm.adapter.js';
+import { GeminiLlmAdapter } from './llm/gemini-llm.adapter.js';
 import { LLM_ADAPTER, type LlmAdapter } from './llm/llm.adapter.js';
 import { ConsoleMailAdapter } from './mail/console-mail.adapter.js';
 import { MAIL_ADAPTER, type MailAdapter } from './mail/mail.adapter.js';
@@ -48,17 +50,37 @@ export function createMailAdapter(env: Env): MailAdapter {
     : outbox;
 }
 
+export function createLlmAdapter(env: Env, gemini: GeminiClient): LlmAdapter {
+  switch (env.LLM_PROVIDER) {
+    case 'gemini':
+      required(env, 'GEMINI_API_KEY');
+      return new GeminiLlmAdapter(gemini);
+    case 'anthropic':
+      return new AnthropicLlmAdapter({
+        apiKey: required(env, 'ANTHROPIC_API_KEY'),
+        baseURL: env.ANTHROPIC_BASE_URL,
+      });
+    default:
+      return new FakeLlmAdapter();
+  }
+}
+
 const providers: Provider[] = [
   {
-    provide: LLM_ADAPTER,
+    // Shared by every Gemini adapter; the SDK client is built on first use, so it's free when unused.
+    provide: GeminiClient,
     inject: [AppConfig],
-    useFactory: ({ env }: AppConfig): LlmAdapter =>
-      env.LLM_PROVIDER === 'anthropic'
-        ? new AnthropicLlmAdapter({
-            apiKey: required(env, 'ANTHROPIC_API_KEY'),
-            baseURL: env.ANTHROPIC_BASE_URL,
-          })
-        : new FakeLlmAdapter(),
+    useFactory: ({ env }: AppConfig) =>
+      new GeminiClient({
+        apiKey: env.GEMINI_API_KEY,
+        timeoutMs: env.GEMINI_TIMEOUT_MS,
+      }),
+  },
+  {
+    provide: LLM_ADAPTER,
+    inject: [AppConfig, GeminiClient],
+    useFactory: ({ env }: AppConfig, gemini: GeminiClient): LlmAdapter =>
+      createLlmAdapter(env, gemini),
   },
   {
     provide: STT_ADAPTER,
@@ -112,6 +134,7 @@ const providers: Provider[] = [
     process.env.STORAGE_PROVIDER === 's3' ? [] : [LocalStorageController],
   providers,
   exports: [
+    GeminiClient,
     LLM_ADAPTER,
     STT_ADAPTER,
     TTS_ADAPTER,

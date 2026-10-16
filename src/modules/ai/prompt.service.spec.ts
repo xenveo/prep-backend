@@ -16,6 +16,7 @@ describe('PromptService', () => {
       version: 3,
       model: 'm-3',
       temperature: 0.1,
+      thinkingLevel: 'medium',
       template: 't',
     });
     expect(await service.getActive('evaluator')).toEqual({
@@ -23,12 +24,26 @@ describe('PromptService', () => {
       version: 3,
       model: 'm-3',
       temperature: 0.1,
+      thinkingLevel: 'medium',
       template: 't',
     });
     expect(findFirst).toHaveBeenCalledWith({
       where: { role: 'evaluator', active: true },
       orderBy: { version: 'desc' },
     });
+  });
+
+  it('treats a missing or unknown thinking level as the model default', async () => {
+    for (const thinkingLevel of [null, 'minimal']) {
+      const { service } = setup({
+        version: 1,
+        model: 'm',
+        temperature: 0,
+        thinkingLevel,
+        template: '',
+      });
+      expect((await service.getActive('evaluator')).thinkingLevel).toBeNull();
+    }
   });
 
   it('falls back to the default as version 0', async () => {
@@ -76,6 +91,16 @@ describe('PromptService', () => {
       summariser: 0.3,
       interviewer: 0.5,
       drafter: 0.7,
+    });
+    expect(
+      Object.fromEntries(
+        DEFAULT_PROMPTS.map((p) => [p.role, [p.model, p.thinkingLevel]]),
+      ),
+    ).toEqual({
+      evaluator: ['gemini-3.8-flash', 'low'],
+      interviewer: ['gemini-3.8-flash', 'low'],
+      summariser: ['gemini-3.8-flash', 'medium'],
+      drafter: ['gemini-3.8-flash', 'medium'],
     });
     // Prompts that see candidate text carry the delimiter rule.
     for (const p of DEFAULT_PROMPTS.filter((d) => d.role !== 'drafter')) {

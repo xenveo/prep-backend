@@ -310,6 +310,7 @@ async function main() {
           version: 1,
           model: p.model,
           temperature: p.temperature,
+          thinkingLevel: p.thinkingLevel,
           template: p.template,
           active: true,
         },

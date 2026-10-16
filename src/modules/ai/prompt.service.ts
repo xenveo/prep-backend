@@ -1,4 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import {
+  THINKING_LEVELS,
+  type ThinkingLevel,
+} from '../../adapters/llm/llm.adapter.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { DEFAULT_PROMPTS, type PromptRole } from './prompts/defaults.js';
 
@@ -8,6 +12,8 @@ export type ActivePrompt = {
   version: number;
   model: string;
   temperature: number;
+  /** Null = the model's default. */
+  thinkingLevel: ThinkingLevel | null;
   template: string;
 };
 
@@ -43,6 +49,7 @@ export class PromptService {
           version: row.version,
           model: row.model,
           temperature: row.temperature,
+          thinkingLevel: toThinkingLevel(row.thinkingLevel),
           template: row.template,
         }
       : { ...DEFAULT_PROMPTS.find((p) => p.role === role)!, version: 0 };
@@ -69,4 +76,9 @@ export class PromptService {
     if (role) this.cache.delete(role);
     else this.cache.clear();
   }
+}
+
+/** The column is free text; anything but a known level means the model's default. */
+export function toThinkingLevel(value: string | null): ThinkingLevel | null {
+  return THINKING_LEVELS.find((l) => l === value) ?? null;
 }
