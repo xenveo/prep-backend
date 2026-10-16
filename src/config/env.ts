@@ -46,6 +46,8 @@ export const envSchema = z.object({
   OTP_REQUESTS_PER_HOUR: z.coerce.number().int().default(5),
   OTP_IP_REQUESTS_PER_HOUR: z.coerce.number().int().default(20),
   OTP_RESEND_COOLDOWN_SEC: z.coerce.number().int().default(30),
+  /** Dev only: any well-formed code logs in an eligible user. Refused when NODE_ENV=production. */
+  AUTH_DEV_ACCEPT_ANY_CODE: bool,
   AI_ADMIN_CALLS_PER_HOUR: z.coerce.number().int().default(30),
 
   LLM_PROVIDER: z.enum(['anthropic', 'fake']).default('fake'),
@@ -66,6 +68,12 @@ export const envSchema = z.object({
   LOG_PRETTY: bool,
   SENTRY_DSN: z.string().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
-});
+}).refine(
+  (env) => !(env.AUTH_DEV_ACCEPT_ANY_CODE && env.NODE_ENV === 'production'),
+  {
+    message: 'must not be true in production',
+    path: ['AUTH_DEV_ACCEPT_ANY_CODE'],
+  },
+);
 
 export type Env = z.infer<typeof envSchema>;

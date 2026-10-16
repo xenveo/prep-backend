@@ -46,7 +46,7 @@ const codeRow = (code: string, over: object = {}) => ({
   ...over,
 });
 
-function setup() {
+function setup(envOver: object = {}) {
   const tx = {
     authCode: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     invite: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
@@ -82,7 +82,7 @@ function setup() {
   };
   const service = new AuthService(
     prisma as unknown as PrismaService,
-    { env } as unknown as AppConfig,
+    { env: { ...env, ...envOver } } as unknown as AppConfig,
     rateLimiter as unknown as RateLimiter,
     email as unknown as EmailService,
     activity as unknown as ActivityService,
@@ -290,6 +290,34 @@ describe('AuthService', () => {
         where: { id: 'c1' },
         data: { usedAt: NOW },
       });
+      expect(tx.authSession.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('verify with AUTH_DEV_ACCEPT_ANY_CODE', () => {
+    it('logs in an eligible user with any code, even without a requested code', async () => {
+      const { service, prisma, tx } = setup({ AUTH_DEV_ACCEPT_ANY_CODE: true });
+      prisma.user.findUnique.mockResolvedValue(user());
+      await expect(
+        service.verify({ email: EMAIL, code: '000000' }),
+      ).resolves.toMatchObject({ result: 'ok' });
+      expect(prisma.authCode.findFirst).not.toHaveBeenCalled();
+      expect(tx.authCode.updateMany).toHaveBeenCalledWith({
+        where: { email: EMAIL, usedAt: null },
+        data: { usedAt: NOW },
+      });
+      expect(tx.authSession.create).toHaveBeenCalled();
+    });
+
+    it('still refuses unknown and ineligible users', async () => {
+      const { service, prisma, tx } = setup({ AUTH_DEV_ACCEPT_ANY_CODE: true });
+      prisma.user.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(user({ status: 'deactivated' }));
+      for (let i = 0; i < 2; i++)
+        await expect(
+          service.verify({ email: EMAIL, code: '000000' }),
+        ).resolves.toEqual({ result: 'expired' });
       expect(tx.authSession.create).not.toHaveBeenCalled();
     });
   });

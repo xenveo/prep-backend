@@ -155,6 +155,8 @@ export class AuthService {
     code: string,
   ): Promise<VerifyOutcome> {
     const now = new Date();
+    if (this.config.env.AUTH_DEV_ACCEPT_ANY_CODE)
+      return this.verifyAnyCode(email, now);
     const authCode = await this.prisma.authCode.findFirst({
       where: { email, usedAt: null, expiresAt: { gt: now } },
       orderBy: { createdAt: 'desc' },
@@ -189,6 +191,21 @@ export class AuthService {
         data: { usedAt: now },
       });
       if (count === 0) throw new AlreadyConsumed();
+    });
+  }
+
+  /** AUTH_DEV_ACCEPT_ANY_CODE: skips the code check but keeps eligibility, and burns any live codes. */
+  private async verifyAnyCode(
+    email: string,
+    now: Date,
+  ): Promise<VerifyOutcome> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || !isEligible(user, now)) return { result: 'expired' };
+    return this.login(user, now, async (tx) => {
+      await tx.authCode.updateMany({
+        where: { email, usedAt: null },
+        data: { usedAt: now },
+      });
     });
   }
 
