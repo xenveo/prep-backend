@@ -61,7 +61,7 @@ Update this table as tasks land: status, evidence, and any deviations.
 | D1 residency | user | done: no India requirement (2026-10-16) | |
 | D4 hosting | user | done: manual, by the user (2026-10-16) | |
 | D2, D3, D5 | user | done: recommendations adopted (2026-10-16); D2 settled by the spike | |
-| P0 Gemini spike (4 checks in 01) | Coordinator | pending | Models available to the key confirmed 2026-10-16 |
+| P0 Gemini spike | Coordinator | done 2026-10-16 | See 01 "P0 results": compact transcription accurate (WER ≤ 3%), per-word timestamps too slow; Gemini pause timing unreliable beyond about 20 s; evaluator schema-valid at 6–8 s; TTS WAV 24 kHz and verbatim; about $0.11/session. Two decisions raised: pause source, feedback latency |
 | REDIS | backend Coder | pending | |
 | MAIL | backend Coder | pending | |
 | Model choice | user | done 2026-10-16: `gemini-3.8-flash` (assessment, generation, transcription) + `gemini-3.8-flash-tts` (interviewer voice); no Live model; interview flow stays record-then-upload | |

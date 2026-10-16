@@ -119,7 +119,68 @@ Write throwaway scripts in the scratchpad, not the repo, and run them with the r
 
 Record the results here and in the ledger.
 
-## Tests
+## P0 results (2026-10-16)
+
+**Method.** The scripts and data are in the session scratchpad, not the repo.
+- **Corpus:** 8 synthetic answers of 14–22 s, spoken by 7 macOS voices: Rishi, Veena and Lekha (Indian English), Samantha, Daniel, Karen and Moira. Segments were trimmed and joined with silences of exact known length, giving exact ground truth: text, fillers, and 15 pauses over 1 s.
+- **Long answers:** two joined from that corpus, 66 s (11 pauses) and 146 s (22 pauses).
+- **Format:** encoded as AAC/m4a (`audio/mp4`).
+- **Evaluator input:** the backend's own evaluator template, user message and Zod schema (`dump_eval.ts` imports them), on two seeded questions.
+- **Prices:** paid-tier list prices valid to 2026-12-31. They double from 2027-01-01.
+
+**Transcription (`gemini-3.8-flash`).** Accurate, but per-word timestamps don't scale.
+
+| Variant | Accuracy | Pauses > 1 s | Latency | Verdict |
+| --- | --- | --- | --- | --- |
+| Per-word `{w,start,end}` (current contract) | mean WER 0.9%, fillers 12/12, timestamps monotonic and in range | 13/15 found, 0 false (short clips) | **7–11 s for a 17 s clip**; about 1,000 output tokens for 45 words, so a 2-min answer would take about 60 s | ✗ too slow |
+| **Compact `{text, pauses[{start,end}]}`** | WER 0–3.2%, fillers 28/28 (long ones included) | 14/15 on short clips, but **4/11 at 66 s and 5/22 with 10 false at 146 s** | 2.8–5.7 s short; **4.3 s at 66 s, 7.8 s at 146 s** | ✓ transcript; ✗ pauses on real-length answers |
+
+→ Use the compact transcript. **Gemini can't supply reliable pause metrics** for 1–2 min answers, so D2 needs a different source (see "Decisions raised").
+
+**Evaluator (`gemini-3.8-flash`, thinking `low`, real prompt and schema).**
+- 5/5 returned valid JSON with `finishReason=STOP` and all required keys.
+- Scores were plausible: short synthetic answers rated 1–3. `spoken_summary` was 35–58 words, under the 80-word rule.
+- Latency **6.2–7.7 s**, about 730 output tokens. Thinking tokens were mostly 0, but `low` occasionally spent about 300.
+
+**Feedback latency (FR-FB-01 target: p90 ≤ 8 s).** Transcription (≈ 4–8 s for 1–2 min answers) plus evaluation (≈ 6–8 s) comes to **about 11–15 s**, so the target is **not met**. See "Decisions raised".
+
+**Voice (`gemini-3.8-flash-tts`).**
+- 10/10 clips are **WAV, 24 kHz, mono, 16-bit**, about 47 KB/s; a 30 s clip is about 1.4 MB.
+- Verbatim: re-transcribing the output matched the input text (9/10 exact, 1 at 8% WER from a name or number rendering).
+- Latency 2.6–5.8 s per clip. That's fine, because questions are pre-generated and feedback audio follows the written feedback as its own event.
+- Indian English voices exist in the voice library, e.g. `en-in-podcaster-7` (male, crisp interviewer) and `en-in-tutor-11` (female mentor), alongside standard voices like `aoede` and `charon`.
+
+**Cost per session**, at 2026 prices:
+
+| Item | Cost |
+| --- | --- |
+| 10 transcriptions (about $0.002–0.006 each, compact) | about $0.04 |
+| 10 evaluations (about $0.0033 each) | about $0.033 |
+| 10 feedback clips (about $0.003 each) | about $0.03 |
+| Summariser | about $0.005 |
+| Question audio | amortised |
+| **Total** | **≈ $0.11/session**, or about $0.22 from 2027 |
+
+That's well under the USD 0.50 target (NFR-10).
+
+**Not measured.**
+- **Rate limits and the key's tier:** the API doesn't expose them. Check them in Google AI Studio.
+- **Free-tier warning:** the free tier lets Google use the content to improve its products, so production must use a paid-tier key, because candidate answers are personal data.
+- **Not covered by the corpus:** real human speech with noise and real accents, and Chrome's `audio/webm` (opus) uploads; there's no encoder on this machine. Re-check both in P3 with real recordings.
+
+### Decisions raised by P0
+
+1. **Pause metrics (D2).** Gemini's timings are unreliable on real-length answers. Options:
+   - **(a) Recommended: measure in the browser while recording.** The candidate room already holds the mic stream. A small Web Audio level detector computes pause count, longest pause and speaking time, which are sent with the upload next to `durationSec`.
+     - It's accurate, needs no new dependency, and adds no server cost.
+     - The trade-off is that the client reports them. In a practice tool that only affects the candidate's own coaching, which is acceptable.
+     - The server still computes wpm and fillers from the transcript.
+   - **(b) Server-side decode** with an audio decoder (ffmpeg, a new system dependency in the image).
+   - **(c) Drop pauses** and keep pace and fillers only.
+2. **Feedback latency (FR-FB-01).** Expected 11–15 s against 8 s. Options:
+   - **(a) Recommended: split the evaluator.** A first call returns only what the feedback panel needs (scores, worked, improve, opener, improvement points), at about 300–400 output tokens, so about 3–4 s. A second call, in parallel or right after, returns `spoken_summary`, highlights and evidence for the spoken feedback and the admin review. That brings written feedback to about 7–11 s.
+   - **(b)** Accept about 12–15 s for R1. The UI already shows "transcribing" and "evaluating" states.
+   - **(c)** Measure the real p90 in P3 before deciding.
 
 - **Unit tests** with a mocked `GoogleGenAI`: request mapping, thinking levels, errors and cost; STT schema parsing for both outcomes; the TTS request, WAV pass-through and duration, and the voice table.
 - **e2e** stays on fakes.
