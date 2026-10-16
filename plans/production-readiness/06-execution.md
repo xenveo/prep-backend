@@ -62,8 +62,8 @@ Update this table as tasks land: status, evidence, and any deviations.
 | D4 hosting | user | done: manual, by the user (2026-10-16) | |
 | D2, D3, D5 | user | done: recommendations adopted (2026-10-16); D2 settled by the spike | |
 | P0 Gemini spike | Coordinator | done 2026-10-16 | See 01 "P0 results": compact transcription accurate (WER ≤ 3%), per-word timestamps too slow; Gemini pause timing unreliable beyond about 20 s; evaluator schema-valid at 6–8 s; TTS WAV 24 kHz and verbatim; about $0.11/session. Two decisions raised: pause source, feedback latency |
-| REDIS | backend Coder | in progress (2026-10-16) | |
-| MAIL | backend Coder | in progress (2026-10-16) | |
+| REDIS | backend Coder | done 2026-10-16 | `preppilot:` prefix on all keys, queues and channels (verified in Redis DB 2); PermanentJobError → UnrecoverableError; send-rate limiter; retention 24 h/7 d; recovery sweep (attempts every 2 min, exports hourly, separate locks); `redis` in /api/health. Unit 633/633; e2e in-memory 77/77; e2e on Redis 74/77. The 3 privacy tests use the in-memory-only `queue.drain()`; make them Redis-aware in OPS-CI |
+| MAIL | backend Coder | done 2026-10-16 | Resend adapter (`resend` 6.18.1), permanent vs retryable mapping, idempotency key = unique email job id, allowlist routes the rest to the outbox. Live: a real invite was delivered to the allowlisted inbox via Resend; a non-allowlisted login code was suppressed to the outbox |
 | Model choice | user | done 2026-10-16: `gemini-3.8-flash` (assessment, generation, transcription) + `gemini-3.8-flash-tts` (interviewer voice); no Live model; interview flow stays record-then-upload | |
 | D2, D6, D7 (pause source, feedback latency, dev allowlist) | user | done 2026-10-16: browser pause meter; split evaluator; allowlist kartik.pavan@atrox.io | |
 | G-LLM | backend Coder | pending | |
@@ -76,4 +76,4 @@ Update this table as tasks land: status, evidence, and any deviations.
 | F1–F3, PD2–PD3 (admin) | admin agent | pending | |
 | B1–B2, PD3–PD4 (candidate) | candidate agent | pending | |
 | F4–F7 | — | deferred after R1 | |
-| OPS-IMAGE / CI / CAL / LOAD / API | backend Coder | pending | |
+| OPS-IMAGE / CI / CAL / LOAD / API | backend Coder | pending | OPS-CI: make the privacy e2e wait on jobs instead of the in-memory `drain()`. Readiness endpoint failing on Redis down (open from REDIS) |

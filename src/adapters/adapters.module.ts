@@ -7,6 +7,7 @@ import { FakeLlmAdapter } from './llm/fake-llm.adapter.js';
 import { LLM_ADAPTER, type LlmAdapter } from './llm/llm.adapter.js';
 import { ConsoleMailAdapter } from './mail/console-mail.adapter.js';
 import { MAIL_ADAPTER, type MailAdapter } from './mail/mail.adapter.js';
+import { ResendMailAdapter } from './mail/resend-mail.adapter.js';
 import { SesMailAdapter } from './mail/ses-mail.adapter.js';
 import { LocalStorageAdapter } from './storage/local-storage.adapter.js';
 import { LocalStorageController } from './storage/local-storage.controller.js';
@@ -27,6 +28,24 @@ function required(env: Env, key: keyof Env): string {
   if (typeof value !== 'string' || !value)
     throw new Error(`${key} is required for the configured provider`);
   return value;
+}
+
+/** Resend sends allowlisted recipients only (when MAIL_ALLOWLIST is set) and routes the rest to the console outbox. */
+export function createMailAdapter(env: Env): MailAdapter {
+  const outbox = new ConsoleMailAdapter(
+    env.NODE_ENV === 'development'
+      ? join(env.LOCAL_STORAGE_DIR, 'outbox')
+      : undefined,
+  );
+  if (env.MAIL_PROVIDER === 'resend')
+    return new ResendMailAdapter(
+      required(env, 'RESEND_API_KEY'),
+      env.MAIL_ALLOWLIST,
+      outbox,
+    );
+  return env.MAIL_PROVIDER === 'ses'
+    ? new SesMailAdapter(env.SES_REGION)
+    : outbox;
 }
 
 const providers: Provider[] = [
@@ -60,14 +79,7 @@ const providers: Provider[] = [
   {
     provide: MAIL_ADAPTER,
     inject: [AppConfig],
-    useFactory: ({ env }: AppConfig): MailAdapter =>
-      env.MAIL_PROVIDER === 'ses'
-        ? new SesMailAdapter(env.SES_REGION)
-        : new ConsoleMailAdapter(
-            env.NODE_ENV === 'development'
-              ? join(env.LOCAL_STORAGE_DIR, 'outbox')
-              : undefined,
-          ),
+    useFactory: ({ env }: AppConfig): MailAdapter => createMailAdapter(env),
   },
   {
     provide: STORAGE_ADAPTER,

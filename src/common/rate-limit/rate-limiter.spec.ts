@@ -45,3 +45,32 @@ describe('RateLimiter (in-memory)', () => {
     expect((await limiter.consume('a', 1, 60)).allowed).toBe(true);
   });
 });
+
+describe('RateLimiter (Redis)', () => {
+  const evalScript = vi.fn();
+  const del = vi.fn().mockResolvedValue(1);
+  const limiter = new RateLimiter({
+    client: { eval: evalScript, del },
+    key: (...parts: string[]) => ['preppilot', ...parts].join(':'),
+  } as unknown as RedisService);
+
+  it('keeps windows under <prefix>:rl:<key> and reads count and TTL back', async () => {
+    evalScript.mockResolvedValueOnce([1, 60]).mockResolvedValueOnce([2, 42]);
+    await expect(limiter.consume('otp:h1', 1, 60)).resolves.toEqual({
+      allowed: true,
+      retryAfterSec: 0,
+    });
+    await expect(limiter.consume('otp:h1', 1, 60)).resolves.toEqual({
+      allowed: false,
+      retryAfterSec: 42,
+    });
+    await limiter.reset('otp:h1');
+    expect(evalScript).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'preppilot:rl:otp:h1',
+      60,
+    );
+    expect(del).toHaveBeenCalledWith('preppilot:rl:otp:h1');
+  });
+});

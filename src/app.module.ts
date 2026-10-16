@@ -6,6 +6,7 @@ import { InfraModule } from './common/infra/infra.module.js';
 import { LoggingModule } from './common/logging/logging.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { EmailModule } from './jobs/email/email.module.js';
+import { RecoveryModule } from './jobs/recovery/recovery.module.js';
 import { ActivityModule } from './modules/activity/activity.module.js';
 import { AiModule } from './modules/ai/ai.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
@@ -40,6 +41,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
     InterviewModule,
     ReportsModule,
     PrivacyModule,
+    RecoveryModule,
   ],
 })
 export class AppModule {}

@@ -15,7 +15,9 @@ function fakeQueue() {
   };
 }
 
-const config = { env: { MAIL_FROM: 'no-reply@preppilot.local' } } as AppConfig;
+const config = {
+  env: { MAIL_FROM: 'no-reply@preppilot.local', MAIL_RATE_PER_SECOND: 2 },
+} as AppConfig;
 
 function settingsWith(senderName: string, replyTo: string) {
   return {
@@ -26,7 +28,7 @@ function settingsWith(senderName: string, replyTo: string) {
 }
 
 describe('EmailService', () => {
-  it('enqueues on the email queue with 3 attempts and 2 s backoff', async () => {
+  it('enqueues on the email queue with a unique id, 3 attempts and 2 s backoff', async () => {
     const queue = fakeQueue();
     const job = {
       template: 'login-code',
@@ -35,6 +37,7 @@ describe('EmailService', () => {
     } as const;
     await new EmailService(queue).send(job);
     expect(queue.add).toHaveBeenCalledWith('email', job, {
+      jobId: expect.stringMatching(/^email-[0-9a-f-]{36}$/),
       attempts: 3,
       backoffMs: 2000,
     });
@@ -42,7 +45,7 @@ describe('EmailService', () => {
 });
 
 describe('EmailProcessor', () => {
-  it('registers the email processor on init', () => {
+  it('registers the email processor on init, limited to the provider send rate', () => {
     const queue = fakeQueue();
     new EmailProcessor(
       queue,
@@ -50,7 +53,26 @@ describe('EmailProcessor', () => {
       settingsWith('PrepPilot', ''),
       config,
     ).onModuleInit();
-    expect(queue.process).toHaveBeenCalledWith('email', expect.any(Function));
+    expect(queue.process).toHaveBeenCalledWith('email', expect.any(Function), {
+      limiter: { max: 2, durationMs: 1000 },
+    });
+  });
+
+  it('passes the job id as the idempotency key', async () => {
+    const queue = fakeQueue();
+    const mail = new ConsoleMailAdapter();
+    new EmailProcessor(
+      queue,
+      mail,
+      settingsWith('PrepPilot', ''),
+      config,
+    ).onModuleInit();
+    const handler = queue.process.mock.calls[0][1];
+    await handler(
+      { template: 'erasure-complete', to: 'c@example.com', vars: {} },
+      { jobId: 'job-42', attempt: 1 },
+    );
+    expect(mail.lastTo('c@example.com')!.idempotencyKey).toBe('job-42');
   });
 
   it('renders the template and sends with sender name and reply-to from settings', async () => {
@@ -100,6 +122,20 @@ describe('formatFrom / validReplyTo', () => {
       '"EvilBcc: a@b.c" <x@y.z>',
     );
     expect(formatFrom('  ', 'x@y.z')).toBe('x@y.z');
+  });
+
+  it('takes only the address from a named MAIL_FROM, falling back to its name', () => {
+    const named = 'Xenveo <noreply@emails.xenveo.com>';
+    expect(formatFrom('PrepPilot', named)).toBe(
+      '"PrepPilot" <noreply@emails.xenveo.com>',
+    );
+    expect(formatFrom('', named)).toBe('"Xenveo" <noreply@emails.xenveo.com>');
+    expect(formatFrom('', '"Xenveo Mail" <noreply@emails.xenveo.com>')).toBe(
+      '"Xenveo Mail" <noreply@emails.xenveo.com>',
+    );
+    expect(formatFrom('', '<noreply@emails.xenveo.com>')).toBe(
+      'noreply@emails.xenveo.com',
+    );
   });
 
   it('accepts only plain addresses', () => {

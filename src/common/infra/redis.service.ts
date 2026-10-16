@@ -6,15 +6,30 @@ import { AppConfig } from '../../config/app-config.js';
  * Shared Redis connection (plan §8). `client` is null when REDIS_URL is unset: callers then use their
  * in-process fallback. Connections close on application shutdown, after the queue and event bus
  * have closed theirs in onModuleDestroy.
+ *
+ * The server may be shared with other apps, and pub/sub ignores the DB index, so every key, channel
+ * and BullMQ queue goes under `prefix`. Build names with `key()`, never by hand.
  */
 @Injectable()
 export class RedisService implements OnApplicationShutdown {
   readonly client: Redis | null;
   private readonly duplicates: Redis[] = [];
+  private readonly keyPrefix: string;
 
   constructor(config: AppConfig) {
     const url = config.env.REDIS_URL;
     this.client = url ? new Redis(url) : null;
+    this.keyPrefix = config.env.REDIS_PREFIX;
+  }
+
+  /** Namespace for this app (`REDIS_PREFIX`), also BullMQ's queue prefix. */
+  get prefix(): string {
+    return this.keyPrefix;
+  }
+
+  /** A namespaced key or channel name: `key('rl', 'otp')` is `<prefix>:rl:otp`. */
+  key(...parts: string[]): string {
+    return [this.keyPrefix, ...parts].join(':');
   }
 
   /** A new connection to the same server, for subscribers and BullMQ (which needs blocking connections). */

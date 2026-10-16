@@ -9,6 +9,8 @@ export type MailMessage = {
   subject: string;
   text: string;
   html: string;
+  /** Provider-side dedupe for retries (Resend keeps it 24 h). SES's SendEmail has no equivalent, so it ignores this. */
+  idempotencyKey?: string;
 };
 
 export interface MailAdapter {
