@@ -45,6 +45,8 @@ export type RoleSettings = {
   maxSessionsPerCandidate: number | null;
   sessionWeights: SessionWeights;
   dimensionWeights: DimensionWeights;
+  /** FR-INT-07: the evaluator may ask one probe after a too-vague first try; it frames the retry. */
+  followUpEnabled: boolean;
 };
 
 export const DEFAULT_ROLE_SETTINGS: RoleSettings = {
@@ -55,6 +57,7 @@ export const DEFAULT_ROLE_SETTINGS: RoleSettings = {
   maxSessionsPerCandidate: 5,
   sessionWeights: { firstTry: 20, secondTry: 55, learning: 25 },
   dimensionWeights: { content: 45, structure: 20, delivery: 20, relevance: 15 },
+  followUpEnabled: false,
 };
 
 // ---------------------------------------------------------------------------

@@ -46,6 +46,16 @@ describe('session state', () => {
     });
   });
 
+  it('carries the follow-up probe so a resumed retry still shows it (FR-INT-07)', () => {
+    const session = loadedSession(2, [attempt(1, 1)]);
+    session.questions[0].followUpText = 'Can you give a specific example?';
+    const view = toInProgressView(session);
+    expect(view.results[0].followUp).toBe('Can you give a specific example?');
+    expect(
+      toInProgressView(loadedSession(2, [attempt(1, 1)])).results[0],
+    ).not.toHaveProperty('followUp');
+  });
+
   it('a pending second try keeps the result awaiting_retry with second null', () => {
     const view = toInProgressView(
       loadedSession(2, [

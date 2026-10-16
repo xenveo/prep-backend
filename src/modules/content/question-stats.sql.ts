@@ -2,6 +2,7 @@
 // avgFirstTry, avgSecondTry and avgLearning from completed sessions"). Raw SQL is not erasure-filtered,
 // so it joins `users` on deleted_at IS NULL and skips preview sessions itself.
 import type { PrismaService } from '../../prisma/prisma.service.js';
+import { SKIPPED_RETRY_LEARNING } from '../interview/scoring/score.js';
 import type { QuestionStats } from './content.serializers.js';
 
 type Row = {
@@ -12,7 +13,10 @@ type Row = {
   avg_learning: number | null;
 };
 
-/** Stats per question id for one role. Questions never asked are absent. A skipped retry counts as learning 0. */
+/**
+ * Stats per question id for one role. Questions never asked are absent. A skipped retry counts as
+ * learning SKIPPED_RETRY_LEARNING, for sessions completed before the 2026-10-16 rule change too.
+ */
 export async function questionStats(
   prisma: PrismaService,
   jobRoleId: string,
@@ -22,7 +26,7 @@ export async function questionStats(
            COUNT(*)::int AS times_asked,
            ROUND(AVG(a1."score"))::int AS avg_first,
            ROUND(AVG(a2."score") FILTER (WHERE NOT sq."retry_skipped"))::int AS avg_second,
-           ROUND(AVG(CASE WHEN sq."retry_skipped" THEN 0 ELSE a2."learning_score" END))::int AS avg_learning
+           ROUND(AVG(CASE WHEN sq."retry_skipped" THEN ${SKIPPED_RETRY_LEARNING}::int ELSE a2."learning_score" END))::int AS avg_learning
     FROM "session_questions" sq
     JOIN "sessions" s
       ON s."id" = sq."session_id" AND s."status" = 'completed' AND NOT s."is_preview"

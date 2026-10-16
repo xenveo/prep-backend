@@ -144,6 +144,8 @@ export type StartedSession = {
 
 export type InProgressResult = QuestionResult & {
   state: 'awaiting_retry' | 'done';
+  /** The probe asked after the first try (FR-INT-07); the retry answers it. */
+  followUp?: string;
 };
 
 export type InProgressSession = {

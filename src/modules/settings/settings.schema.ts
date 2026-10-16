@@ -60,6 +60,8 @@ export const workspaceSettingsSchema = z.object({
       'Enter a valid reply-to address',
     )
     .default('[reply-to@company.com]'),
+  /** SRS 7.4: email the candidate a link to their results when a session completes. Off by default. */
+  sessionCompleteEmail: z.boolean().default(false),
   inviteLinkExpiryDays: z.number().int().min(1).max(90).default(7),
   lastExportAt: z.string().nullable().default(null),
   erasureGraceDays: z.number().int().min(0).max(30).default(7),
@@ -95,6 +97,7 @@ export const settingsPatchSchema = z.object({
   candidatesCanDeleteData: s.candidatesCanDeleteData.unwrap().optional(),
   senderName: s.senderName.unwrap().optional(),
   replyTo: s.replyTo.unwrap().optional(),
+  sessionCompleteEmail: s.sessionCompleteEmail.unwrap().optional(),
   inviteLinkExpiryDays: s.inviteLinkExpiryDays.unwrap().optional(),
 });
 
@@ -123,6 +126,11 @@ export const SETTINGS_FIELD_AUDIT: readonly FieldAuditDef<WorkspaceSettingsData>
     },
     { key: 'senderName', action: 'Changed sender name' },
     { key: 'replyTo', action: 'Changed reply-to address' },
+    {
+      key: 'sessionCompleteEmail',
+      action: 'Changed session-complete email',
+      show: (v: boolean) => (v ? 'On' : 'Off'),
+    },
     // Not editable in the admin UI yet, so it has no UI action string.
     {
       key: 'inviteLinkExpiryDays',

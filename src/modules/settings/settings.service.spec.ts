@@ -25,6 +25,7 @@ describe('SettingsService', () => {
       candidatesCanDeleteData: true,
       senderName: 'PrepPilot for [Company]',
       replyTo: '[reply-to@company.com]',
+      sessionCompleteEmail: false,
       inviteLinkExpiryDays: 7,
       lastExportAt: null,
       erasureGraceDays: 7,
@@ -55,6 +56,8 @@ describe('SettingsService', () => {
     ).get();
     expect(settings.audioRetentionDays).toBe(90);
     expect(settings.voice).toBe('Calm, mid-pitch');
+    // Documents stored before the setting existed read it as off.
+    expect(settings.sessionCompleteEmail).toBe(false);
     expect(settings.deliveryTargets.pace.min).toBe(110);
     expect(settings.deliveryTargets.fillers).toEqual(
       DEFAULT_WORKSPACE_SETTINGS.deliveryTargets.fillers,

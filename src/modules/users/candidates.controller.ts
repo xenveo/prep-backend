@@ -176,4 +176,14 @@ export class CandidatesController {
   ): Promise<SavedFilter> {
     return this.savedFilters.create(admin, body, ip);
   }
+
+  @Delete('saved-filters/:id')
+  @HttpCode(204)
+  deleteSavedFilter(
+    @CurrentUser() admin: AuthUser,
+    @Param('id', idPipe) id: string,
+    @ClientIp() ip: string,
+  ): Promise<void> {
+    return this.savedFilters.remove(admin, id, ip);
+  }
 }

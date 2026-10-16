@@ -1,6 +1,7 @@
 import { DEFAULT_ROLE_SETTINGS } from '../types.js';
 import {
   BAND_MESSAGES,
+  SKIPPED_RETRY_LEARNING,
   attemptScore,
   bandFor,
   dimensionScoresFromLevels,
@@ -90,7 +91,31 @@ describe('sessionScore', () => {
     expect(r.band).toBe('nearly_ready');
   });
 
-  it('counts a skipped retry as A2 = A1 and L = 0', () => {
+  it('counts a skipped retry as A2 = A1 and L = 50 (no change)', () => {
+    const r = sessionScore(
+      [{ first: 60, second: null, learning: null }],
+      sessionWeights,
+    );
+    expect(SKIPPED_RETRY_LEARNING).toBe(50);
+    expect(r.firstTryAvg).toBe(60);
+    expect(r.retryAvg).toBe(60);
+    expect(r.learningAvg).toBe(50);
+    // 0.2·60 + 0.55·60 + 0.25·50 = 12 + 33 + 12.5 = 57.5 → 58
+    expect(r.score).toBe(58);
+  });
+
+  it('scores a skipped retry like a retry with no improvement', () => {
+    expect(
+      sessionScore(
+        [{ first: 60, second: null, learning: null }],
+        sessionWeights,
+      ),
+    ).toEqual(
+      sessionScore([{ first: 60, second: 60, learning: 50 }], sessionWeights),
+    );
+  });
+
+  it('mixes skipped and retried questions', () => {
     const r = sessionScore(
       [
         { first: 60, second: 80, learning: 100 },
@@ -100,18 +125,54 @@ describe('sessionScore', () => {
     );
     expect(r.firstTryAvg).toBe(50);
     expect(r.retryAvg).toBe(60);
-    expect(r.learningAvg).toBe(50);
-    // 0.2·50 + 0.55·60 + 0.25·50 = 10 + 33 + 12.5 = 55.5 → 56
-    expect(r.score).toBe(56);
+    expect(r.learningAvg).toBe(75);
+    // 0.2·50 + 0.55·60 + 0.25·75 = 10 + 33 + 18.75 = 61.75 → 62
+    expect(r.score).toBe(62);
   });
+
+  it('scores every retry skipped', () => {
+    const r = sessionScore(
+      [
+        { first: 90, second: null, learning: null },
+        { first: 80, second: null, learning: null },
+      ],
+      sessionWeights,
+    );
+    expect(r.firstTryAvg).toBe(85);
+    expect(r.retryAvg).toBe(85);
+    expect(r.learningAvg).toBe(50);
+    // 0.2·85 + 0.55·85 + 0.25·50 = 17 + 46.75 + 12.5 = 76.25 → 76
+    expect(r.score).toBe(76);
+    expect(r.band).toBe('nearly_ready');
+  });
+
+  it.each([
+    [49, 49, 'not_ready'],
+    [50, 50, 'developing'],
+    [75, 69, 'developing'],
+    [77, 70, 'nearly_ready'],
+    [95, 84, 'nearly_ready'],
+    [97, 85, 'interview_ready'],
+  ] as const)(
+    'all skipped at first try %i → %i, %s (band edges)',
+    (first, score, band) => {
+      const r = sessionScore(
+        [{ first, second: null, learning: null }],
+        sessionWeights,
+      );
+      expect(r.score).toBe(score);
+      expect(r.band).toBe(band);
+    },
+  );
 
   it('ignores a stale learning value on a skipped retry', () => {
     const r = sessionScore(
       [{ first: 70, second: null, learning: 90 }],
       sessionWeights,
     );
-    expect(r.learningAvg).toBe(0);
-    expect(r.score).toBe(Math.round(0.2 * 70 + 0.55 * 70));
+    expect(r.learningAvg).toBe(50);
+    // 0.2·70 + 0.55·70 + 0.25·50 = 14 + 38.5 + 12.5 = 65
+    expect(r.score).toBe(65);
   });
 
   it('is zero for no questions', () => {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../../common/audit/audit.service.js';
 import type { AuthUser } from '../../common/auth/auth.types.js';
+import { notFound } from '../../common/errors/app-error.js';
 import type {
   Prisma,
   SavedFilter as SavedFilterRow,
@@ -50,6 +51,26 @@ export class SavedFiltersService {
     });
     return toView(row);
   }
+
+  /** Deletes one of the caller's own filters. System rows and other admins' filters are 404. */
+  async remove(admin: AuthUser, id: string, ip: string | null): Promise<void> {
+    const row = await this.prisma.savedFilter.findFirst({
+      where: { id, adminId: admin.id },
+    });
+    if (!row) throw notFound('Saved filter not found');
+    const { count } = await this.prisma.savedFilter.deleteMany({
+      where: { id: row.id, adminId: admin.id },
+    });
+    if (count === 0) throw notFound('Saved filter not found');
+    await this.audit.record({
+      actorId: admin.id,
+      action: 'Deleted a saved filter',
+      entity: 'saved_filter',
+      entityId: row.id,
+      itemLabel: row.label,
+      ip,
+    });
+  }
 }
 
 function toView(row: SavedFilterRow): SavedFilter {
@@ -58,6 +79,7 @@ function toView(row: SavedFilterRow): SavedFilter {
   return {
     id: row.id,
     label: row.label,
+    adminId: row.adminId,
     query: query.success ? query.data : {},
     ...(row.isDefault ? { isDefault: true } : {}),
   };

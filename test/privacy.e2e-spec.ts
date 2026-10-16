@@ -191,6 +191,7 @@ describe('Settings, audit and privacy (e2e)', () => {
           'lastExportAt',
           'replyTo',
           'senderName',
+          'sessionCompleteEmail',
           'transcriptRetention',
           'voice',
         ].sort(),
@@ -250,6 +251,48 @@ describe('Settings, audit and privacy (e2e)', () => {
         .send({ audioRetentionDays: 14 })
         .expect(400);
       expect(res.body.error.code).toBe('validation_failed');
+    });
+
+    it('session-complete email: a boolean only a super admin changes, audited On/Off', async () => {
+      const before = (
+        await t
+          .http()
+          .get('/api/admin/settings')
+          .set('Cookie', adminCookie)
+          .expect(200)
+      ).body.sessionCompleteEmail;
+      expect(typeof before).toBe('boolean');
+      await t
+        .http()
+        .patch('/api/admin/settings')
+        .set('Cookie', adminCookie)
+        .send({ sessionCompleteEmail: !before })
+        .expect(404);
+      await t
+        .http()
+        .patch('/api/admin/settings')
+        .set('Cookie', superCookie)
+        .send({ sessionCompleteEmail: 'yes' })
+        .expect(400);
+      const res = await t
+        .http()
+        .patch('/api/admin/settings')
+        .set('Cookie', superCookie)
+        .send({ sessionCompleteEmail: !before })
+        .expect(200);
+      expect(res.body.sessionCompleteEmail).toBe(!before);
+      const row = await t.prisma.auditLog.findFirst({
+        where: { actorId: superId, action: 'Changed session-complete email' },
+        orderBy: { at: 'desc' },
+      });
+      const label = (v: boolean) => (v ? 'On' : 'Off');
+      expect(row?.itemLabel).toBe(`${label(before)} → ${label(!before)}`);
+      await t
+        .http()
+        .patch('/api/admin/settings')
+        .set('Cookie', superCookie)
+        .send({ sessionCompleteEmail: before })
+        .expect(200);
     });
 
     it('voice sample redirects to signed audio; unknown voice is 404', async () => {
@@ -485,6 +528,75 @@ describe('Settings, audit and privacy (e2e)', () => {
         where: { entityId: res.body.exportId },
       });
       expect(audit?.action).toBe('Exported all data');
+    });
+  });
+
+  describe('own privacy requests', () => {
+    it('lists only the caller’s pending or last-90-day requests, newest first', async () => {
+      const cand = await loginAs(t.prisma, { email: emailFor('asker') });
+      const other = await loginAs(t.prisma, { email: emailFor('other') });
+      const day = 864e5;
+      const at = (daysAgo: number) => new Date(Date.now() - daysAgo * day);
+      const make = (
+        userId: string,
+        kind: string,
+        status: string,
+        daysAgo: number,
+      ) =>
+        t.prisma.privacyRequest.create({
+          data: {
+            userId,
+            kind,
+            status,
+            createdAt: at(daysAgo),
+            completedAt: status === 'pending' ? null : at(daysAgo - 1),
+          },
+        });
+      const recentExport = await make(cand.user.id, 'export', 'completed', 3);
+      const pendingDeletion = await make(
+        cand.user.id,
+        'deletion',
+        'pending',
+        1,
+      );
+      const oldPending = await make(cand.user.id, 'export', 'pending', 200);
+      await make(cand.user.id, 'export', 'completed', 120);
+      await make(other.user.id, 'export', 'pending', 1);
+
+      const res = await t
+        .http()
+        .get('/api/me/privacy-requests')
+        .set('Cookie', cand.cookie)
+        .expect(200);
+      expect(res.body).toEqual([
+        {
+          id: pendingDeletion.id,
+          kind: 'deletion',
+          status: 'pending',
+          createdAt: pendingDeletion.createdAt.toISOString(),
+          completedAt: null,
+        },
+        {
+          id: recentExport.id,
+          kind: 'export',
+          status: 'completed',
+          createdAt: recentExport.createdAt.toISOString(),
+          completedAt: recentExport.completedAt!.toISOString(),
+        },
+        {
+          id: oldPending.id,
+          kind: 'export',
+          status: 'pending',
+          createdAt: oldPending.createdAt.toISOString(),
+          completedAt: null,
+        },
+      ]);
+      await t
+        .http()
+        .get('/api/me/privacy-requests')
+        .set('Cookie', adminCookie)
+        .expect(404);
+      await t.http().get('/api/me/privacy-requests').expect(401);
     });
   });
 

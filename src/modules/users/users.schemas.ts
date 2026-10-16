@@ -164,6 +164,8 @@ export type SaveFilterBody = z.infer<typeof saveFilterSchema>;
 export type SavedFilter = {
   id: string;
   label: string;
+  /** The owner; null for system filters. Only the owner can delete a filter. */
+  adminId: string | null;
   query: z.infer<typeof candidateQuerySchema>;
   isDefault?: boolean;
 };

@@ -460,6 +460,69 @@ describe('Users and invites (e2e)', () => {
     expect(theirs.body.map((f: { id: string }) => f.id)).not.toContain(
       created.body.id,
     );
+    const system = mine.body.find(
+      (f: { label: string }) => f.label === 'All candidates',
+    );
+    expect(system.adminId).toBeNull();
+    expect(
+      mine.body.find((f: { id: string }) => f.id === created.body.id).adminId,
+    ).toBe(superId);
+  });
+
+  it('deletes only the caller’s own saved filter, audited', async () => {
+    const created = await t
+      .http()
+      .post('/api/admin/saved-filters')
+      .set(asSuper())
+      .send({ label: 'To delete', query: {} })
+      .expect(201);
+    const system = (
+      await t.http().get('/api/admin/saved-filters').set(asSuper()).expect(200)
+    ).body.find((f: { adminId: string | null }) => f.adminId === null);
+
+    // Another admin's filter and a system filter are 404; a malformed id is a 400.
+    await t
+      .http()
+      .delete(`/api/admin/saved-filters/${created.body.id}`)
+      .set('Cookie', adminCookie)
+      .expect(404);
+    await t
+      .http()
+      .delete(`/api/admin/saved-filters/${system.id}`)
+      .set(asSuper())
+      .expect(404);
+    await t
+      .http()
+      .delete('/api/admin/saved-filters/nope')
+      .set(asSuper())
+      .expect(400);
+
+    await t
+      .http()
+      .delete(`/api/admin/saved-filters/${created.body.id}`)
+      .set(asSuper())
+      .expect(204);
+    expect(
+      await t.prisma.savedFilter.count({ where: { id: created.body.id } }),
+    ).toBe(0);
+    expect(
+      await t.prisma.auditLog.findFirst({
+        where: { actorId: superId, entityId: created.body.id },
+        orderBy: { at: 'desc' },
+      }),
+    ).toMatchObject({
+      action: 'Deleted a saved filter',
+      entity: 'saved_filter',
+      itemLabel: 'To delete',
+    });
+    await t
+      .http()
+      .delete(`/api/admin/saved-filters/${created.body.id}`)
+      .set(asSuper())
+      .expect(404);
+    expect(await t.prisma.savedFilter.count({ where: { id: system.id } })).toBe(
+      1,
+    );
   });
 
   describe('admins', () => {

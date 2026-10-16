@@ -3,7 +3,8 @@
 //   node --env-file=.env --import tsx scripts/calibrate.ts <fixture.json> [--limit N] [--max-usd 1.00]
 //
 // Scores each human-scored answer with the real evaluator call 1 (the active 'evaluator' prompt
-// version and model, the question's rubric from the database), then compares levels per dimension.
+// version and model, the question's rubric and the workspace delivery targets from the database),
+// then compares levels per dimension.
 // Prints a markdown summary and writes `<fixture>.results-<timestamp>.json` next to the fixture.
 // Never prints answer text or notes. Exit code: 0 pass, 1 fail, 2 invalid input or aborted.
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -27,6 +28,7 @@ import {
 } from '../src/modules/ai/evaluator.service.js';
 import { PromptService } from '../src/modules/ai/prompt.service.js';
 import type { RoleSettings, Rubric } from '../src/modules/interview/types.js';
+import { SettingsService } from '../src/modules/settings/settings.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import {
   calibrationFixtureSchema,
@@ -138,6 +140,7 @@ type Resolved = {
 
 /** Every item's role and question, before any LLM call; a fixture that doesn't resolve fails fast. */
 async function resolve(): Promise<Resolved[]> {
+  const { deliveryTargets } = await new SettingsService(prisma).get();
   const resolved: Resolved[] = [];
   const missing: string[] = [];
   for (const [index, item] of items.entries()) {
@@ -170,6 +173,7 @@ async function resolve(): Promise<Resolved[]> {
         transcript: item.answerText,
         mode: item.mode,
         delivery: item.delivery ?? null,
+        deliveryTargets,
         attemptNo: 1,
         dimensionWeights: (role.settings as RoleSettings).dimensionWeights,
       },

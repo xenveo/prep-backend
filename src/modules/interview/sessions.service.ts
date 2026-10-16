@@ -2,11 +2,13 @@ import { randomInt } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth.types.js';
 import { AppError, conflict, notFound } from '../../common/errors/app-error.js';
+import { AppConfig } from '../../config/app-config.js';
 import {
   type Band,
   type JobRole,
   Prisma,
 } from '../../generated/prisma/client.js';
+import { EmailService } from '../../jobs/email/email.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { ActivityService } from '../activity/activity.service.js';
 import { InterviewerService } from '../ai/interviewer.service.js';
@@ -14,7 +16,9 @@ import { PromptService } from '../ai/prompt.service.js';
 import { SummariserService } from '../ai/summariser.service.js';
 import { ContentQueryService } from '../content/content-query.service.js';
 import { TtsCacheService } from '../content/tts-cache.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { AssignmentsService } from '../users/assignments.service.js';
+import { UsersService } from '../users/users.service.js';
 import type {
   StartSessionBody,
   StartedSession,
@@ -93,6 +97,10 @@ export class SessionsService {
     private readonly interviewer: InterviewerService,
     private readonly summariser: SummariserService,
     private readonly activity: ActivityService,
+    private readonly settings: SettingsService,
+    private readonly users: UsersService,
+    private readonly email: EmailService,
+    private readonly config: AppConfig,
   ) {}
 
   /** POST /roles/:roleId/sessions. 403 when blocked, 409 with the session when one is in progress. */
@@ -287,8 +295,40 @@ export class SessionsService {
         `Completed session ${fresh.number} · ${totals.score} ${BAND_LABELS[totals.band]}${baseline}`,
         completedAt,
       );
+      await this.emailResults(userId, fresh, totals.score);
     }
     return this.report(fresh);
+  }
+
+  /**
+   * SRS 7.4: when the workspace turns it on, emails the candidate a link to their results. Runs once,
+   * after the completion commit; a failure is logged (ids only) and never fails the completion.
+   */
+  private async emailResults(
+    userId: string,
+    session: LoadedSession,
+    score: number,
+  ): Promise<void> {
+    try {
+      if (!(await this.settings.get()).sessionCompleteEmail) return;
+      // Erased (or otherwise gone) candidates are not found, so nothing is sent to them.
+      const user = await this.users.findCandidate(userId);
+      const role = encodeURIComponent(session.role.slug);
+      await this.email.send({
+        template: 'session-complete',
+        to: user.email,
+        vars: {
+          name: user.name ?? '',
+          roleTitle: session.role.title,
+          score,
+          link: `${this.config.env.APP_CANDIDATE_ORIGIN}/roles/${role}/results/${session.id}`,
+        },
+      });
+    } catch (e) {
+      this.logger.warn(
+        `session-complete email not queued for session ${session.id}: ${(e as Error).name}`,
+      );
+    }
   }
 
   /** POST /sessions/:id/abandon. */

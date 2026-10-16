@@ -31,6 +31,8 @@ export const PRIVACY_AUDIT_ACTION: Record<PrivacyKind, string> = {
 
 /** Completed requests stay in the admin list this long. */
 const RECENT_DAYS = 30;
+/** Completed requests stay in the candidate's own list this long. */
+const OWN_RECENT_DAYS = 90;
 
 export type PrivacyRequestView = {
   id: string;
@@ -42,6 +44,15 @@ export type PrivacyRequestView = {
   createdAt: string;
   completedAt: string | null;
   completedBy: string | null;
+};
+
+/** GET /me/privacy-requests row. Anything that left pending (completed, or a rejected row) is closed: 'completed'. */
+export type OwnPrivacyRequestView = {
+  id: string;
+  kind: PrivacyKind;
+  status: 'pending' | 'completed';
+  createdAt: string;
+  completedAt: string | null;
 };
 
 /** Candidate export and deletion requests (NFR-06, DPDP Act 2023). */
@@ -79,6 +90,34 @@ export class PrivacyService {
       data: { userId, kind: 'deletion', status: 'pending' },
     });
     return { requestId: request.id };
+  }
+
+  /** GET /me/privacy-requests: the caller's pending requests and those from the last 90 days, newest first. */
+  async listOwn(
+    userId: string,
+    now = new Date(),
+  ): Promise<OwnPrivacyRequestView[]> {
+    const rows = await this.prisma.privacyRequest.findMany({
+      where: {
+        userId,
+        OR: [
+          { status: 'pending' },
+          {
+            createdAt: {
+              gte: new Date(now.getTime() - OWN_RECENT_DAYS * 864e5),
+            },
+          },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind as PrivacyKind,
+      status: r.status === 'pending' ? 'pending' : 'completed',
+      createdAt: r.createdAt.toISOString(),
+      completedAt: r.completedAt?.toISOString() ?? null,
+    }));
   }
 
   /** Pending requests and those from the last 30 days, newest first. Hidden users drop out. */

@@ -476,7 +476,7 @@ TTS runs after the push and is not counted. Track every step as an OTel span.
 2. Compute:
    - `A1` = mean of attempt-1 scores
    - `A2` = mean of attempt-2 scores, using the attempt-1 score where the retry was skipped
-   - `L` = mean learning score (skipped retries count as 0)
+   - `L` = mean learning score; a skipped retry counts as 50, "no change" (user decision 2026-10-16, replacing FR-RETRY-05's 0)
    - `score = round(w1·A1 + w2·A2 + wL·L)` using `weightsSnapshot`
    - `band` from thresholds 85, 70 and 50
    - `skills` = the per-dimension mean over all attempts

@@ -38,6 +38,7 @@ import {
   toAppliedItems,
   toCandidateAttempt,
 } from '../serializers/candidate.serializer.js';
+import { roleSettings } from '../sessions.service.js';
 import type {
   AttemptJob,
   Rubric,
@@ -172,13 +173,14 @@ export class AttemptPipelineService implements OnModuleInit {
       select: {
         status: true,
         weightsSnapshot: true,
-        role: { select: { title: true } },
+        role: { select: { title: true, settings: true } },
       },
     });
     const sq = await this.prisma.sessionQuestion.findUnique({
       where: { sessionId_questionId: { sessionId, questionId } },
       select: {
         position: true,
+        followUpText: true,
         question: { select: { text: true, rubric: true } },
       },
     });
@@ -221,10 +223,8 @@ export class AttemptPipelineService implements OnModuleInit {
         transcript: stt.text,
       });
     }
-    const delivery = toDeliveryMetrics(
-      metrics,
-      (await this.settings.get()).deliveryTargets,
-    );
+    const { deliveryTargets } = await this.settings.get();
+    const delivery = toDeliveryMetrics(metrics, deliveryTargets);
 
     // 3. Evaluate: call 1, scores and written feedback.
     const attemptNo = attempt.attemptNo === 2 ? 2 : 1;
@@ -238,8 +238,11 @@ export class AttemptPipelineService implements OnModuleInit {
       transcript,
       mode: attempt.mode,
       delivery: metrics,
+      deliveryTargets,
       attemptNo,
       previousImprovementPoints,
+      followUpAllowed: roleSettings(session.role).followUpEnabled,
+      followUpAsked: attemptNo === 2 ? sq.followUpText : null,
       dimensionWeights: weights.dimensionWeights,
       sessionId,
       attemptId,
@@ -251,7 +254,7 @@ export class AttemptPipelineService implements OnModuleInit {
     // 4. Persist and push the written feedback.
     t = performance.now();
     const feedback = buildStoredFeedback(result.output, delivery);
-    const followUp = attemptNo === 1 ? result.output.follow_up : null;
+    const followUp = result.output.follow_up;
     const writes: Prisma.PrismaPromise<unknown>[] = [
       this.prisma.attempt.update({
         where: { id: attemptId },

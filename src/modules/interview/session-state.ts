@@ -35,7 +35,7 @@ export type LoadedSession = Prisma.SessionGetPayload<{
 }>;
 
 export type QuestionState = {
-  sq: SessionQuestionRow & { questionId: string };
+  sq: SessionQuestionRow & { questionId: string; followUpText: string | null };
   first: Attempt | null;
   second: Attempt | null;
   /** Attempt 1 is done and either attempt 2 is done or the retry was skipped. */
@@ -76,10 +76,12 @@ export function toInProgressView(session: LoadedSession): InProgressSession {
   for (const s of states) {
     if (!isDone(s.first)) continue;
     const second = isDone(s.second) ? s.second : null;
-    results.push({
+    const result: InProgressResult = {
       ...toQuestionResult(s.sq, s.first, second),
       state: s.done ? 'done' : 'awaiting_retry',
-    });
+    };
+    if (s.sq.followUpText) result.followUp = s.sq.followUpText;
+    results.push(result);
   }
   const pending = session.attempts.find(
     (a) => a.status !== 'done' && a.status !== 'failed',

@@ -7,7 +7,11 @@ import type {
 } from '../../generated/prisma/client.js';
 import type { AdminBand } from '../../common/mapping/enums.js';
 import { CATEGORY_LABELS } from '../interview/serializers/candidate.serializer.js';
-import type { RoleSettings, Rubric } from '../interview/types.js';
+import {
+  DEFAULT_ROLE_SETTINGS,
+  type RoleSettings,
+  type Rubric,
+} from '../interview/types.js';
 
 export type AdminJobRole = {
   id: string;
@@ -117,7 +121,11 @@ export function toAdminRole(role: JobRole, d: RoleDerived): AdminJobRole {
     status: role.status,
     description: role.descriptionHtml,
     keySkills: role.keySkills,
-    settings: role.settings as RoleSettings,
+    // Defaults fill settings added after the role was saved (e.g. followUpEnabled).
+    settings: {
+      ...DEFAULT_ROLE_SETTINGS,
+      ...(role.settings as Partial<RoleSettings> | null),
+    },
     updatedAt: role.updatedAt.toISOString(),
     updatedBy: role.updatedBy,
     ...d,

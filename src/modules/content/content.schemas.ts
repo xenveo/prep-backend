@@ -34,6 +34,7 @@ export const roleSettingsSchema = z.object({
     delivery: percent,
     relevance: percent,
   }),
+  followUpEnabled: z.boolean().default(false),
 });
 
 export const roleStatusQuerySchema = z.object({

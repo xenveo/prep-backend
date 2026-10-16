@@ -5,6 +5,7 @@ import { SettingsAdminService } from './settings-admin.service.js';
 import {
   DEFAULT_WORKSPACE_SETTINGS,
   SETTINGS_FIELD_AUDIT,
+  settingsPatchSchema,
   type WorkspaceSettingsData,
 } from './settings.schema.js';
 import { SettingsService } from './settings.service.js';
@@ -78,6 +79,31 @@ describe('SettingsAdminService', () => {
     )!;
     expect(retention.action).toBe('Changed audio retention');
     expect(retention.show!(90)).toBe('90 days');
+  });
+
+  it('accepts and audits the session-complete email switch as On/Off', async () => {
+    expect(settingsPatchSchema.parse({ sessionCompleteEmail: true })).toEqual({
+      sessionCompleteEmail: true,
+    });
+    expect(
+      settingsPatchSchema.safeParse({ sessionCompleteEmail: 'yes' }).success,
+    ).toBe(false);
+    const def = SETTINGS_FIELD_AUDIT.find(
+      (f) => f.key === 'sessionCompleteEmail',
+    )!;
+    expect(def.action).toBe('Changed session-complete email');
+    expect([def.show!(false), def.show!(true)]).toEqual(['Off', 'On']);
+
+    const { service, settings } = setup({ sessionCompleteEmail: true });
+    const view = await service.update(
+      { sessionCompleteEmail: true },
+      'sa1',
+      null,
+    );
+    expect(settings.update).toHaveBeenCalledWith({
+      sessionCompleteEmail: true,
+    });
+    expect(view.sessionCompleteEmail).toBe(true);
   });
 
   it('voice sample: signed URL for a known voice, 404 otherwise', async () => {
