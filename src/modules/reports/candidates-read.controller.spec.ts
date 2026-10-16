@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import { CandidatesReadController } from './candidates-read.controller.js';
 import type { CandidatesReadService } from './candidates-read.service.js';
+import type { SessionReportPdfService } from './pdf/session-report-pdf.service.js';
 import type { SessionReviewService } from './session-review.service.js';
 
 const A = '0b8f7d1e-6c2a-4f1e-9a52-3d6c1b2a4e5f';
@@ -13,6 +14,7 @@ function setup() {
   const controller = new CandidatesReadController(
     candidates as unknown as CandidatesReadService,
     {} as SessionReviewService,
+    {} as SessionReportPdfService,
   );
   const response = () => {
     const headers: Record<string, string> = {};

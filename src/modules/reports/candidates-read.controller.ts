@@ -2,17 +2,21 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Param,
   Post,
   Query,
   Res,
+  StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Roles } from '../../common/auth/roles.decorator.js';
 import { ZodPipe } from '../../common/validation/zod.pipe.js';
 import { CandidatesReadService } from './candidates-read.service.js';
 import { attachment } from './csv.js';
+import { fromSessionReview } from './pdf/session-report.model.js';
+import { SessionReportPdfService } from './pdf/session-report-pdf.service.js';
 import {
   candidateExportBodySchema,
   type CandidateExportBody,
@@ -37,6 +41,7 @@ export class CandidatesReadController {
   constructor(
     private readonly candidates: CandidatesReadService,
     private readonly reviews: SessionReviewService,
+    private readonly pdf: SessionReportPdfService,
   ) {}
 
   @Get()
@@ -76,6 +81,17 @@ export class CandidatesReadController {
     @Param('sid', uuid) sid: string,
   ): Promise<SessionReview> {
     return this.reviews.review(cid, sid);
+  }
+
+  /** The session review as a PDF (FR-SCORE-04). A read, so not audited (like the CSV export). */
+  @Get(':cid/sessions/:sid/report.pdf')
+  @Header('Cache-Control', 'no-store')
+  async reviewPdf(
+    @Param('cid', uuid) cid: string,
+    @Param('sid', uuid) sid: string,
+  ): Promise<StreamableFile> {
+    const review = await this.reviews.review(cid, sid);
+    return this.pdf.download(fromSessionReview(review));
   }
 
   private async sendCsv(ids: string[], res: Response): Promise<string> {

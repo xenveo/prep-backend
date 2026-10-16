@@ -1,6 +1,8 @@
 // Admin read models (FR-REP-01..05): candidate list/detail/CSV, session review, flags, reports.
 // Seeds its own role and candidates under a RUN prefix; preview sessions and erased users must
 // never show up.
+import { SESSION_COOKIE } from '../src/common/auth/auth.types.js';
+import { randomToken, sha256Hex } from '../src/common/crypto.js';
 import { DEFAULT_ROLE_SETTINGS } from '../src/modules/interview/types.js';
 import type { Band } from '../src/generated/prisma/client.js';
 import {
@@ -860,6 +862,122 @@ describe('Reports and admin read models (e2e)', () => {
         `/api/admin/reports/export.csv?roleId=${roleId}&dateBasis=invited`,
       );
       expect(invited.text.split('\r\n')[1]).toMatch(/ · by invite date$/);
+    });
+  });
+
+  describe('PDF session report (FR-SCORE-04)', () => {
+    let alphaCookie: string;
+
+    beforeAll(async () => {
+      const token = randomToken();
+      await t.prisma.authSession.create({
+        data: {
+          userId: ids.alpha,
+          tokenHash: sha256Hex(token),
+          lastSeenAt: new Date(),
+          expiresAt: new Date(Date.now() + DAY),
+        },
+      });
+      alphaCookie = `${SESSION_COOKIE}=${token}`;
+    });
+
+    const pdf = (url: string, cookie?: string) => {
+      const req = t.http().get(url).responseType('blob');
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const expectPdf = (res: Awaited<ReturnType<typeof pdf>>) => {
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toBe(
+        `attachment; filename="${RUN}-support-associate-session-2.pdf"`,
+      );
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(Buffer.isBuffer(res.body)).toBe(true);
+      expect((res.body as Buffer).subarray(0, 5).toString('latin1')).toBe(
+        '%PDF-',
+      );
+    };
+
+    it("downloads the candidate's own completed session", async () => {
+      expectPdf(
+        await pdf(`/api/sessions/${sessions.a2}/report.pdf`, alphaCookie),
+      );
+    });
+
+    it("404s for another candidate's session and malformed ids", async () => {
+      const other = await t
+        .http()
+        .get(`/api/sessions/${sessions.a2}/report.pdf`)
+        .set('Cookie', candidateCookie);
+      expect(other.status).toBe(404);
+      expect(other.body.error.code).toBe('not_found');
+      expect(
+        (await pdf('/api/sessions/not-a-uuid/report.pdf', alphaCookie)).status,
+      ).toBe(404);
+    });
+
+    it('409s while the session is in progress', async () => {
+      const live = await t.prisma.session.create({
+        data: {
+          userId: ids.alpha,
+          jobRoleId: roleId,
+          number: 3,
+          status: 'in_progress',
+          mode: 'voice',
+          weightsSnapshot: {
+            sessionWeights: DEFAULT_ROLE_SETTINGS.sessionWeights,
+            dimensionWeights: DEFAULT_ROLE_SETTINGS.dimensionWeights,
+          },
+          promptVersions: {},
+        },
+      });
+      try {
+        const res = await t
+          .http()
+          .get(`/api/sessions/${live.id}/report.pdf`)
+          .set('Cookie', alphaCookie);
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('session_in_progress');
+      } finally {
+        await t.prisma.session.delete({ where: { id: live.id } });
+      }
+    });
+
+    it('downloads the admin session review', async () => {
+      expectPdf(
+        await pdf(
+          `/api/admin/candidates/${ids.alpha}/sessions/${sessions.a2}/report.pdf`,
+          adminCookie,
+        ),
+      );
+      expect(
+        (
+          await get(
+            `/api/admin/candidates/${ids.alpha}/sessions/${sessions.a2}/report.pdf`,
+            candidateCookie,
+          )
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await get(
+            `/api/admin/candidates/${ids.erased}/sessions/${sessions.e1}/report.pdf`,
+          )
+        ).status,
+      ).toBe(404);
+    });
+
+    it('401s without a session', async () => {
+      expect(
+        (await pdf(`/api/sessions/${sessions.a2}/report.pdf`)).status,
+      ).toBe(401);
+      expect(
+        (
+          await pdf(
+            `/api/admin/candidates/${ids.alpha}/sessions/${sessions.a2}/report.pdf`,
+          )
+        ).status,
+      ).toBe(401);
     });
   });
 });
