@@ -4,6 +4,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
 import { randomToken, sha256Hex } from '../src/common/crypto.js';
+import { RateLimiter } from '../src/common/rate-limit/rate-limiter.js';
 import { EmailService } from '../src/jobs/email/email.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 
@@ -29,6 +30,9 @@ describe('Auth (e2e)', () => {
     configureApp(app);
     await app.init();
     prisma = app.get(PrismaService);
+    // On Redis the per-IP OTP window outlives the process; earlier runs from this loopback
+    // address would otherwise rate-limit this one.
+    await app.get(RateLimiter).reset('otp:ip:127.0.0.1');
   });
 
   afterAll(async () => {

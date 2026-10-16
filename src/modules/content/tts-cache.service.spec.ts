@@ -9,6 +9,7 @@ function setup(exists: boolean, mimeType = 'audio/mpeg') {
   const tts = {
     provider: 'fake',
     mimeType,
+    model: 'tts-model-1',
     speak: vi.fn().mockResolvedValue({
       audio: Buffer.from('audio'),
       mimeType,
@@ -85,6 +86,7 @@ describe('TtsCacheService', () => {
     expect(callLog.log).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'tts',
+        model: 'tts-model-1',
         status: 'ok',
         sessionId: 's1',
         audioSeconds: 2.5,

@@ -67,6 +67,7 @@ export class CardsService {
           category: input.category,
           question: input.question,
           strongAnswerPoints: input.strongAnswerPoints,
+          sampleAnswerOutline: input.sampleAnswerOutline,
           commonMistakes: input.commonMistakes,
           tip: input.tip,
           status,
@@ -99,6 +100,7 @@ export class CardsService {
           category: input.category,
           question: input.question,
           strongAnswerPoints: input.strongAnswerPoints,
+          sampleAnswerOutline: input.sampleAnswerOutline,
           commonMistakes: input.commonMistakes,
           tip: input.tip,
           ...(approving

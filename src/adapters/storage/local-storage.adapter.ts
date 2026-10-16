@@ -36,6 +36,8 @@ const CONTENT_TYPES: Record<string, string> = {
   '.ogg': 'audio/ogg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
+  // Voice answers recorded as audio/mp4 (Safari, some Chrome builds) are stored as .mp4.
+  '.mp4': 'audio/mp4',
   '.csv': 'text/csv; charset=utf-8',
   '.json': 'application/json',
   '.zip': 'application/zip',

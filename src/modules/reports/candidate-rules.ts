@@ -4,16 +4,29 @@ import type { CsvCell } from './csv.js';
 import { BAND_LABEL, csvDateTime, daysSince } from './format.js';
 import { toAdminBand } from '../../common/mapping/enums.js';
 import type { CandidateQuery } from './reports.schemas.js';
-import type { CandidateRow, CandidateSortColumn } from './reports.types.js';
+import type {
+  CandidateRow,
+  CandidateSortColumn,
+  ProgressPoint,
+  SessionSummaryView,
+} from './reports.types.js';
 
-/** latest − baseline, or null with fewer than 2 sessions. */
-export function scoreChange(
-  latest: number | null,
-  baseline: number | null,
-  sessions: number,
-): number | null {
-  if (sessions < 2 || latest === null || baseline === null) return null;
-  return latest - baseline;
+/** Completed sessions, oldest first, as progress points numbered per role ("Session 1" per role). */
+export function progressByRole(
+  chrono: Pick<SessionSummaryView, 'roleId' | 'roleTitle' | 'date' | 'score'>[],
+): ProgressPoint[] {
+  const counts = new Map<string, number>();
+  return chrono.map((s) => {
+    const n = (counts.get(s.roleId) ?? 0) + 1;
+    counts.set(s.roleId, n);
+    return {
+      roleId: s.roleId,
+      roleTitle: s.roleTitle,
+      label: `Session ${n}`,
+      date: s.date,
+      score: s.score,
+    };
+  });
 }
 
 /** Does the row pass every filter in the query? `now` drives "active within N days". */

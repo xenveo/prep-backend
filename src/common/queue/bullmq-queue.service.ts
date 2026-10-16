@@ -7,7 +7,7 @@ import {
   type JobsOptions,
 } from 'bullmq';
 import type { Env } from '../../config/env.js';
-import type { RedisService } from '../infra/redis.service.js';
+import { closeWithin, type RedisService } from '../infra/redis.service.js';
 import { assertJobId } from './job-id.js';
 import {
   JOB_OUTCOME_LIMIT,
@@ -158,9 +158,7 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
         `Job failed: queue=${queue} jobId=${job?.id ?? '?'} attempt=${job?.attemptsMade ?? '?'} (${err.name})`,
       );
     });
-    worker.on('error', (err) =>
-      this.logger.error(`Worker error: queue=${queue} (${err.name})`),
-    );
+    worker.on('error', (err) => this.redis.logError(`worker ${queue}`, err));
     this.workers.set(queue, worker);
   }
 
@@ -183,11 +181,25 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
     return removed;
   }
 
+  /**
+   * Workers first (they finish in-flight jobs, which may still enqueue), then queues and listeners,
+   * all within one budget: WORKER_DRAIN_MS with Redis up, CLOSE_TIMEOUT_MS with it down. Whatever
+   * hasn't closed by then is disconnected.
+   */
   async onModuleDestroy(): Promise<void> {
-    await Promise.allSettled([...this.workers.values()].map((w) => w.close()));
-    await Promise.allSettled(
-      [...this.events.values(), ...this.queues.values()].map((c) => c.close()),
-    );
+    const deadline = Date.now() + this.redis.closeBudgetMs();
+    const closeAll = (all: (Worker | Queue | QueueEvents)[]) =>
+      Promise.all(
+        all.map((c) =>
+          closeWithin(
+            () => c.close(),
+            () => c.disconnect(),
+            Math.max(0, deadline - Date.now()),
+          ),
+        ),
+      );
+    await closeAll([...this.workers.values()]);
+    await closeAll([...this.events.values(), ...this.queues.values()]);
   }
 
   private jobOptions(queue: QueueName, opts: JobOptions): JobsOptions {
@@ -215,9 +227,7 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
         connection: this.redis.client!,
         prefix: this.redis.prefix,
       });
-      queue.on('error', (err) =>
-        this.logger.error(`Queue error: queue=${name} (${err.name})`),
-      );
+      queue.on('error', (err) => this.redis.logError(`queue ${name}`, err));
       this.queues.set(name, queue);
     }
     return queue;
@@ -230,9 +240,7 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
         connection: this.redis.duplicate({ maxRetriesPerRequest: null }),
         prefix: this.redis.prefix,
       });
-      events.on('error', (err) =>
-        this.logger.error(`QueueEvents error: queue=${name} (${err.name})`),
-      );
+      events.on('error', (err) => this.redis.logError(`events ${name}`, err));
       this.events.set(name, events);
     }
     return events;

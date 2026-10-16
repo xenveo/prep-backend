@@ -4,9 +4,11 @@
 // Partial indexes and views live in raw SQL migrations.
 
 generator client {
-  provider        = "prisma-client"
-  output          = "../src/generated/prisma"
-  previewFeatures = ["postgresqlExtensions"]
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  previewFeatures     = ["postgresqlExtensions"]
+  // ESM imports need `.js` suffixes. Set explicitly so generation doesn't depend on tsconfig.json.
+  importFileExtension = "js"
 }
 
 datasource db {

@@ -14,6 +14,8 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().default(3000),
   /** api = HTTP only; worker = queue processors only (src/worker.ts); all = both (dev, tests, in-memory queue). */
   PROCESS_ROLE: z.enum(['all', 'api', 'worker']).default('all'),
+  /** Worker only: when set, src/worker.ts serves GET /ready (readiness JSON) on this port. */
+  WORKER_HEALTH_PORT: z.coerce.number().int().min(1).max(65535).optional(),
 
   DATABASE_URL: z.string().min(1),
   /** Unset = in-process queue, pub/sub and rate limits (single process only). */
@@ -23,6 +25,10 @@ export const envSchema = z.object({
     .string()
     .regex(/^[a-z0-9-]+$/)
     .default('preppilot'),
+  /** Startup waits this long for Redis, then exits non-zero so the orchestrator restarts the process. */
+  REDIS_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  /** Shutdown: how long workers may finish in-flight jobs while Redis is up. Stop grace must exceed it by 5 s. */
+  WORKER_DRAIN_MS: z.coerce.number().int().positive().default(25000),
 
   STORAGE_PROVIDER: z.enum(['s3', 'local']).default('local'),
   S3_BUCKET: z.string().optional(),

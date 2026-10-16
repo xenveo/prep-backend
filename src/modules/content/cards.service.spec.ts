@@ -1,6 +1,7 @@
 import type { AuditService } from '../../common/audit/audit.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import { CardsService, renumberCards } from './cards.service.js';
+import { flashCardInputSchema } from './content.schemas.js';
 import type { RolesService } from './roles.service.js';
 
 const actor = { id: 'admin-1', ip: null };
@@ -33,6 +34,10 @@ function setup(cards: { id: string }[] = [], found: unknown = card()) {
       findMany: vi.fn().mockResolvedValue(cards),
       findUnique: vi.fn().mockResolvedValue(found),
       update: vi.fn().mockResolvedValue(card({ status: 'approved' })),
+      create: vi.fn((args: { data: object }) =>
+        Promise.resolve(card({ ...args.data, id: 'card-2' })),
+      ),
+      aggregate: vi.fn().mockResolvedValue({ _max: { position: 1 } }),
       delete: vi.fn().mockResolvedValue(found),
     },
   };
@@ -132,5 +137,78 @@ describe('CardsService.approve', () => {
       }),
       expect.anything(),
     );
+  });
+});
+
+const input = (over: Record<string, unknown> = {}) =>
+  flashCardInputSchema.parse({
+    category: 'behavioural',
+    question: 'Q',
+    strongAnswerPoints: ['s'],
+    tip: 't',
+    commonMistakes: ['m'],
+    ...over,
+  });
+
+describe('flashCardInputSchema sampleAnswerOutline', () => {
+  it('trims, maps empty to null and keeps omission as undefined', () => {
+    expect(
+      input({ sampleAnswerOutline: '  STAR: S, T, A, R  ' }),
+    ).toMatchObject({ sampleAnswerOutline: 'STAR: S, T, A, R' });
+    expect(
+      input({ sampleAnswerOutline: '   ' }).sampleAnswerOutline,
+    ).toBeNull();
+    expect(input({ sampleAnswerOutline: null }).sampleAnswerOutline).toBeNull();
+    expect(input().sampleAnswerOutline).toBeUndefined();
+  });
+
+  it('accepts 1000 characters and rejects 1001', () => {
+    expect(input({ sampleAnswerOutline: 'x'.repeat(1000) })).toBeTruthy();
+    expect(
+      flashCardInputSchema.safeParse({
+        ...input(),
+        sampleAnswerOutline: 'x'.repeat(1001),
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('CardsService sampleAnswerOutline', () => {
+  it('stores the outline on create and returns it', async () => {
+    const { service, prisma } = setup();
+    const result = await service.create(
+      'role-1',
+      input({ sampleAnswerOutline: 'Situation, action, result' }),
+      actor,
+    );
+    expect(prisma.flashCard.create.mock.calls[0][0].data).toMatchObject({
+      sampleAnswerOutline: 'Situation, action, result',
+    });
+    expect(result.sampleAnswerOutline).toBe('Situation, action, result');
+  });
+
+  it('updates or clears the outline, and leaves it alone when omitted', async () => {
+    const { service, prisma } = setup();
+    prisma.flashCard.update.mockResolvedValue(
+      card({ sampleAnswerOutline: 'Kept' }),
+    );
+    const updated = await service.update(
+      'card-1',
+      input({ sampleAnswerOutline: 'Kept' }),
+      actor,
+    );
+    expect(updated.sampleAnswerOutline).toBe('Kept');
+    await service.update('card-1', input({ sampleAnswerOutline: '' }), actor);
+    await service.update('card-1', input(), actor);
+    const data = prisma.flashCard.update.mock.calls.map((c: any) => c[0].data);
+    expect(data[0].sampleAnswerOutline).toBe('Kept');
+    expect(data[1].sampleAnswerOutline).toBeNull();
+    expect(data[2].sampleAnswerOutline).toBeUndefined();
+  });
+
+  it('serialises a null outline on list', async () => {
+    const { service } = setup([card()]);
+    const [listed] = await service.list('role-1');
+    expect(listed).toHaveProperty('sampleAnswerOutline', null);
   });
 });

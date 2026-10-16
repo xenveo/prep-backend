@@ -4,7 +4,11 @@ import type {
   AdminAppliedState,
   AdminBand,
 } from '../../common/mapping/enums.js';
-import type { RoleStatus, UserStatus } from '../../generated/prisma/client.js';
+import type {
+  AnswerMode,
+  RoleStatus,
+  UserStatus,
+} from '../../generated/prisma/client.js';
 import type {
   Dimension,
   DimensionScores,
@@ -76,8 +80,16 @@ export type CandidateDetail = {
   assignments: RoleAssignmentView[];
   sessions: SessionSummaryView[];
   activity: { text: string; at: string }[];
-  progress: { label: string; date: string; score: number }[];
-  changeSinceFirst: number | null;
+  /** Oldest first; `label` counts each role's completed sessions on its own. */
+  progress: ProgressPoint[];
+};
+
+export type ProgressPoint = {
+  roleId: string;
+  roleTitle: string;
+  label: string;
+  date: string;
+  score: number;
 };
 
 export type Highlight = { text: string; kind: 'match' | 'issue'; note: string };
@@ -92,6 +104,8 @@ export type AdminDelivery = {
 
 export type Try = {
   attempt: 1 | 2;
+  /** How the answer was given; the admin UI labels a typed try's delivery "Clarity (written)". */
+  mode: AnswerMode;
   score: number;
   band: AdminBand;
   audioSeconds: number;

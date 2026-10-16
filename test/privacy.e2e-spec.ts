@@ -3,43 +3,42 @@ import {
   type StorageAdapter,
 } from '../src/adapters/storage/storage.adapter.js';
 import { ERASED_ITEM_LABEL } from '../src/common/audit/audit.service.js';
-import type { InMemoryQueueService } from '../src/common/queue/in-memory-queue.service.js';
-import { QUEUE_SERVICE } from '../src/common/queue/queue.types.js';
+import {
+  QUEUE_SERVICE,
+  type QueueJob,
+  type QueueService,
+} from '../src/common/queue/queue.types.js';
 import type { Prisma } from '../src/generated/prisma/client.js';
 import { EmailService } from '../src/jobs/email/email.service.js';
 import type { EmailJob } from '../src/jobs/email/templates/templates.js';
 import { DEFAULT_ROLE_SETTINGS } from '../src/modules/interview/types.js';
-import { ErasureService } from '../src/modules/privacy/erasure.service.js';
+import {
+  ErasureService,
+  erasurePurgeJobId,
+} from '../src/modules/privacy/erasure.service.js';
 import { RetentionService } from '../src/modules/privacy/retention.service.js';
 import {
   cleanupUsers,
   createTestApp,
   loginAs,
   runId,
+  settle,
   type TestApp,
+  waitFor,
 } from './helpers/e2e.js';
 
 // Settings, audit, AI config, exports and two-stage erasure (plan M7 settings, M8 privacy).
 const RUN = runId('privacy');
 const emailFor = (label: string) => `${RUN}-${label}@example.test`;
 
-async function waitFor<T>(
-  probe: () => Promise<T | null | undefined | false>,
-  timeoutMs = 5000,
-): Promise<T> {
-  const until = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await probe();
-    if (value) return value;
-    if (Date.now() > until) throw new Error('waitFor timed out');
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
+/** No job, or a finished one: nothing left to run. */
+const idle = (job: QueueJob | null) =>
+  !job || job.status === 'done' || job.status === 'failed';
 
 describe('Settings, audit and privacy (e2e)', () => {
   let t: TestApp;
   let storage: StorageAdapter;
-  let queue: InMemoryQueueService;
+  let queue: QueueService;
   const sent: EmailJob[] = [];
   let superCookie: string;
   let superId: string;
@@ -370,7 +369,16 @@ describe('Settings, audit and privacy (e2e)', () => {
         .set('Cookie', cand.cookie)
         .expect(202);
       const { requestId } = res.body;
-      await queue.drain();
+      // The request is completed last, after the bundle is stored and emailed.
+      await settle(t, async () => {
+        const request = await t.prisma.privacyRequest.findUnique({
+          where: { id: requestId },
+        });
+        const job = await t.prisma.exportJob.findFirst({
+          where: { subjectId: cand.user.id },
+        });
+        return request?.status !== 'pending' || job?.status === 'failed';
+      });
 
       const job = await t.prisma.exportJob.findFirst({
         where: { subjectId: cand.user.id },
@@ -452,7 +460,12 @@ describe('Settings, audit and privacy (e2e)', () => {
         .set('Cookie', superCookie)
         .expect(201);
       expect(res.body.lastExportAt).toEqual(expect.any(String));
-      await queue.drain();
+      await settle(t, async () => {
+        const job = await t.prisma.exportJob.findUnique({
+          where: { id: res.body.exportId },
+        });
+        return job?.status === 'done' || job?.status === 'failed';
+      });
       const view = await t
         .http()
         .get(`/api/admin/exports/${res.body.exportId}`)
@@ -577,7 +590,20 @@ describe('Settings, audit and privacy (e2e)', () => {
 
       // Idempotent: a second run is a no-op.
       await t.app.get(ErasureService).purge(cand.user.id);
-      await queue.drain();
+      // Stage 1 has finished and no delayed stage 2 job is left behind.
+      await settle(
+        t,
+        async () =>
+          idle(
+            await queue.getJob('erasure-hide', `erasure-hide-${cand.user.id}`),
+          ) &&
+          idle(
+            await queue.getJob(
+              'erasure-purge',
+              erasurePurgeJobId(cand.user.id),
+            ),
+          ),
+      );
     });
 
     it('is forbidden when the workspace turns candidate deletion off', async () => {

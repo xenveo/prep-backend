@@ -133,6 +133,7 @@ export type SessionReportRow = Pick<
   | 'id'
   | 'jobRoleId'
   | 'number'
+  | 'mode'
   | 'startedAt'
   | 'completedAt'
   | 'score'
@@ -166,6 +167,7 @@ export function toSessionReport(
     id: session.id,
     roleId,
     number: session.number,
+    mode: session.mode,
     startedAt: iso(session.startedAt),
     completedAt: iso(session.completedAt),
     score: session.score,

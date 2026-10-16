@@ -253,8 +253,8 @@ describe('Users and invites (e2e)', () => {
         where: { actorId: superId, entityId: res.body.batchId },
       });
       expect(audit).toMatchObject({
-        action: 'Sent 1 invite',
-        itemLabel: `${RUN}.csv`,
+        action: 'Sent invites',
+        itemLabel: `1 invite · ${RUN}.csv`,
       });
 
       const mail = lastMailTo(emailFor('inv1'));

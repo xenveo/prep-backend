@@ -219,12 +219,14 @@ export class InvitesService {
       where: { id: batch.id },
       data: { sent, skipped },
     });
+    const source = body.fileName ?? body.rows[0]?.email.trim();
+    const count = `${sent} invite${sent === 1 ? '' : 's'}`;
     await this.audit.record({
       actorId: admin.id,
-      action: `Sent ${sent === 1 ? '1 invite' : `${sent} invites`}`,
+      action: 'Sent invites',
       entity: 'invite_batch',
       entityId: batch.id,
-      itemLabel: body.fileName ?? body.rows[0]?.email.trim() ?? 'Invite',
+      itemLabel: source ? `${count} · ${source}` : count,
       after: { sent, skipped, candidateIds: created.map((c) => c.id) },
       ip,
     });
@@ -367,7 +369,7 @@ export class InvitesService {
     if (resent > 0) {
       await this.audit.record({
         actorId: admin.id,
-        action: resent === 1 ? 'Resent an invite' : `Resent ${resent} invites`,
+        action: 'Resent invites',
         entity: 'user',
         entityId: resent === 1 ? users[0].id : null,
         itemLabel: `${resent} candidate${resent === 1 ? '' : 's'}`,

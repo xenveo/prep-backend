@@ -444,5 +444,27 @@ describe('Interview API (e2e)', () => {
     expect(res.body.number).toBe(2);
     await post(`/sessions/${res.body.id}/abandon`).expect(204);
     await get(`/sessions/${res.body.id}`).expect(404);
+    // Abandoned with no answer: it does not count toward the limit (PD4).
+    const roles = await get('/roles').expect(200);
+    expect(roles.body[0].attemptsLeft).toBe(2);
+  });
+
+  it('counts an abandoned session with an answer toward the limit', async () => {
+    const res = await post(`/roles/${slug}/sessions`)
+      .send(startBody)
+      .expect(201);
+    const first = await post(
+      `/sessions/${res.body.id}/questions/${res.body.questions[0].id}/attempts`,
+    )
+      .set('Idempotency-Key', `${RUN}-s3q1a1`)
+      .field('attemptNo', '1')
+      .field('mode', 'typed')
+      .field('text', ANSWER)
+      .field('durationSec', '45')
+      .expect(202);
+    await pollDone(first.body.attemptId);
+    await post(`/sessions/${res.body.id}/abandon`).expect(204);
+    const roles = await get('/roles').expect(200);
+    expect(roles.body[0].attemptsLeft).toBe(1);
   });
 });

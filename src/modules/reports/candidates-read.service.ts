@@ -16,7 +16,7 @@ import { AssignmentsService } from '../users/assignments.service.js';
 import {
   candidateCsvRows,
   matchesQuery,
-  scoreChange,
+  progressByRole,
   sortRows,
 } from './candidate-rules.js';
 import { toCsv } from './csv.js';
@@ -124,7 +124,6 @@ export class CandidatesReadService {
       band: toAdminBand(s.band!),
       durationMin: Math.round((s.durationS ?? 0) / 60),
     }));
-    const chrono = [...summaries].reverse();
 
     return {
       id: user.id,
@@ -161,16 +160,7 @@ export class CandidatesReadService {
       }),
       sessions: summaries,
       activity,
-      progress: chrono.map((s, i) => ({
-        label: `Session ${i + 1}`,
-        date: s.date,
-        score: s.score,
-      })),
-      changeSinceFirst: scoreChange(
-        chrono.at(-1)?.score ?? null,
-        chrono[0]?.score ?? null,
-        chrono.length,
-      ),
+      progress: progressByRole([...summaries].reverse()),
     };
   }
 

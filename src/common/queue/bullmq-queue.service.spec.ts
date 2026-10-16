@@ -1,5 +1,5 @@
 import { UnrecoverableError } from 'bullmq';
-import type { RedisService } from '../infra/redis.service.js';
+import { CLOSE_TIMEOUT_MS, type RedisService } from '../infra/redis.service.js';
 import { BullMqQueueService } from './bullmq-queue.service.js';
 import {
   JOB_OUTCOME_LIMIT,
@@ -13,9 +13,16 @@ type Processor = (job: {
   attemptsMade: number;
 }) => Promise<unknown>;
 
+type Closable = {
+  on: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  disconnect: ReturnType<typeof vi.fn>;
+};
+
 const mocks = vi.hoisted(() => ({
   getJob: vi.fn(),
   add: vi.fn(),
+  closables: [] as Closable[],
   queues: [] as { name: string; opts: { prefix?: string } }[],
   events: [] as { name: string; opts: { prefix?: string } }[],
   workers: [] as {
@@ -24,41 +31,55 @@ const mocks = vi.hoisted(() => ({
     opts: Record<string, unknown>;
   }[],
 }));
-vi.mock('bullmq', () => ({
-  Queue: class {
-    getJob = mocks.getJob;
-    add = mocks.add;
+vi.mock('bullmq', () => {
+  class Closable {
     on = vi.fn();
-    constructor(name: string, opts: { prefix?: string }) {
-      mocks.queues.push({ name, opts });
+    close = vi.fn(() => Promise.resolve());
+    disconnect = vi.fn(() => Promise.resolve());
+    constructor() {
+      mocks.closables.push(this);
     }
-  },
-  QueueEvents: class {
-    waitUntilReady = () => Promise.resolve();
-    on = vi.fn();
-    constructor(name: string, opts: { prefix?: string }) {
-      mocks.events.push({ name, opts });
-    }
-  },
-  Worker: class {
-    on = vi.fn();
-    constructor(
-      name: string,
-      processor: Processor,
-      opts: Record<string, unknown>,
-    ) {
-      mocks.workers.push({ name, processor, opts });
-    }
-  },
-  UnrecoverableError: class extends Error {
-    name = 'UnrecoverableError';
-  },
-}));
+  }
+  return {
+    Queue: class extends Closable {
+      getJob = mocks.getJob;
+      add = mocks.add;
+      constructor(name: string, opts: { prefix?: string }) {
+        super();
+        mocks.queues.push({ name, opts });
+      }
+    },
+    QueueEvents: class extends Closable {
+      waitUntilReady = () => Promise.resolve();
+      constructor(name: string, opts: { prefix?: string }) {
+        super();
+        mocks.events.push({ name, opts });
+      }
+    },
+    Worker: class extends Closable {
+      constructor(
+        name: string,
+        processor: Processor,
+        opts: Record<string, unknown>,
+      ) {
+        super();
+        mocks.workers.push({ name, processor, opts });
+      }
+    },
+    UnrecoverableError: class extends Error {
+      name = 'UnrecoverableError';
+    },
+  };
+});
 
+const logError = vi.fn();
+const closeBudgetMs = vi.fn(() => CLOSE_TIMEOUT_MS);
 const redis = {
   client: {},
   prefix: 'preppilot',
   duplicate: () => ({}),
+  logError,
+  closeBudgetMs,
 } as unknown as RedisService;
 
 describe('BullMqQueueService job status', () => {
@@ -207,6 +228,7 @@ describe('BullMqQueueService Redis namespacing and workers', () => {
     mocks.queues.length = 0;
     mocks.events.length = 0;
     mocks.workers.length = 0;
+    mocks.closables.length = 0;
     mocks.add.mockResolvedValue({
       id: 'j1',
       waitUntilFinished: () => new Promise(() => undefined),
@@ -263,6 +285,94 @@ describe('BullMqQueueService Redis namespacing and workers', () => {
       { emailId: 'e1' },
       { jobId: 'email-1', attempt: 3 },
     );
+  });
+
+  it('routes Worker, Queue and QueueEvents errors to the rate-limited Redis error log', async () => {
+    const service = new BullMqQueueService(redis, 'all');
+    service.process('email', () => Promise.resolve());
+    await service.add('export', { exportJobId: 'x' });
+    await service.addAndWait('ai-draft', {}, 1);
+    const err = new Error('connect ECONNREFUSED');
+    for (const c of mocks.closables) {
+      const [event, listener] = c.on.mock.calls.find(([e]) => e === 'error')!;
+      expect(event).toBe('error');
+      (listener as (e: Error) => void)(err);
+    }
+    expect(logError.mock.calls.map(([source]) => source).sort()).toEqual([
+      'events ai-draft',
+      'queue ai-draft',
+      'queue export',
+      'worker email',
+    ]);
+  });
+
+  it('closes within one CLOSE_TIMEOUT_MS budget and disconnects what hangs (Redis down)', async () => {
+    const service = new BullMqQueueService(redis, 'all');
+    service.process('email', () => Promise.resolve());
+    await service.add('export', { exportJobId: 'x' });
+    await service.addAndWait('ai-draft', {}, 1);
+    vi.useFakeTimers();
+    try {
+      for (const c of mocks.closables)
+        c.close.mockReturnValue(new Promise(() => undefined));
+
+      let done = false;
+      void service.onModuleDestroy().then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(CLOSE_TIMEOUT_MS - 1);
+      expect(done).toBe(false);
+      // The worker's budget ends here; queues and listeners get what's left (none), not 3 s more.
+      await vi.advanceTimersByTimeAsync(10);
+      expect(done).toBe(true);
+      for (const c of mocks.closables) {
+        expect(c.close).toHaveBeenCalled();
+        expect(c.disconnect).toHaveBeenCalled();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets in-flight jobs finish within the drain budget while Redis is up', async () => {
+    const service = new BullMqQueueService(redis, 'all');
+    service.process('email', () => Promise.resolve());
+    await service.add('export', { exportJobId: 'x' });
+    const [worker, queue] = [mocks.closables[0], mocks.closables[1]];
+    vi.useFakeTimers();
+    try {
+      closeBudgetMs.mockReturnValueOnce(25_000);
+      worker.close.mockReturnValue(
+        new Promise((resolve) => setTimeout(resolve, 8000)),
+      );
+      let done = false;
+      void service.onModuleDestroy().then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(7999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(done).toBe(true);
+      expect(queue.close).toHaveBeenCalled();
+      for (const c of mocks.closables)
+        expect(c.disconnect).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes workers before queues and does not disconnect a clean close', async () => {
+    const service = new BullMqQueueService(redis, 'all');
+    service.process('email', () => Promise.resolve());
+    await service.add('export', { exportJobId: 'x' });
+    const [worker, queue] = [mocks.closables[0], mocks.closables[1]];
+    let release!: () => void;
+    worker.close.mockReturnValue(new Promise<void>((r) => (release = r)));
+
+    const done = service.onModuleDestroy();
+    await Promise.resolve();
+    expect(queue.close).not.toHaveBeenCalled();
+    release();
+    await done;
+    expect(queue.close).toHaveBeenCalled();
+    for (const c of mocks.closables)
+      expect(c.disconnect).not.toHaveBeenCalled();
   });
 
   it('starts no worker in the api role', () => {

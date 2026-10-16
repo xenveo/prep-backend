@@ -115,8 +115,7 @@ export class UsersService {
     if (n > 0) {
       await this.audit.record({
         actorId: admin.id,
-        action:
-          n === 1 ? 'Deactivated a candidate' : `Deactivated ${n} candidates`,
+        action: 'Deactivated candidates',
         entity: 'user',
         entityId: n === 1 ? users[0].id : null,
         itemLabel: plural(n, 'candidate'),
@@ -152,8 +151,7 @@ export class UsersService {
     if (n > 0) {
       await this.audit.record({
         actorId: admin.id,
-        action:
-          n === 1 ? 'Reactivated a candidate' : `Reactivated ${n} candidates`,
+        action: 'Reactivated candidates',
         entity: 'user',
         entityId: n === 1 ? users[0].id : null,
         itemLabel: plural(n, 'candidate'),

@@ -20,6 +20,8 @@ function requestId(req: IncomingMessage, res: ServerResponse): string {
 /** Path without the query string: queries can carry search terms (names, emails). */
 const pathOf = (url: string | undefined) => (url ?? '').split('?')[0];
 
+const PROBE_PATHS = new Set(['/api/health', '/api/ready']);
+
 function loggerParams({ env }: AppConfig): Params {
   return {
     pinoHttp: {
@@ -28,7 +30,8 @@ function loggerParams({ env }: AppConfig): Params {
         ? { target: 'pino-pretty', options: { singleLine: true } }
         : undefined,
       genReqId: requestId,
-      autoLogging: { ignore: (req) => pathOf(req.url) === '/api/health' },
+      // Probes poll these every few seconds; logging each request would drown the real traffic.
+      autoLogging: { ignore: (req) => PROBE_PATHS.has(pathOf(req.url)) },
       // Ids, method and path only. Bodies are never logged; headers only through the redaction below.
       serializers: {
         req: (req: { id: unknown; method: string; url: string }) => ({

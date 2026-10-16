@@ -20,6 +20,7 @@ const DEFAULT_VOICE = 'Calm, mid-pitch';
 export class ElevenLabsTtsAdapter implements TtsAdapter {
   readonly provider = 'elevenlabs';
   readonly mimeType = 'audio/mpeg';
+  readonly model = MODEL_ID;
 
   constructor(
     private readonly apiKey: string,

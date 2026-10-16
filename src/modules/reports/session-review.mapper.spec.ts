@@ -9,6 +9,7 @@ import type { Try } from './reports.types.js';
 
 const attempt = (over: Partial<ReviewAttempt> = {}): ReviewAttempt => ({
   attemptNo: 1,
+  mode: 'voice',
   score: 69,
   durationS: 98.4,
   dimensionScores: { content: 75, structure: 50, delivery: 75, relevance: 75 },
@@ -37,6 +38,7 @@ describe('toTry', () => {
   it('maps an attempt to the admin Try shape', () => {
     expect(toTry(attempt(), 'https://signed')).toEqual({
       attempt: 1,
+      mode: 'voice',
       score: 69,
       band: 'developing',
       audioSeconds: 98,
@@ -60,6 +62,7 @@ describe('toTry', () => {
     const t = toTry(
       attempt({
         attemptNo: 2,
+        mode: 'typed',
         score: 70,
         wpm: null,
         fillerCount: null,
@@ -81,6 +84,7 @@ describe('toTry', () => {
       null,
     );
     expect(t.band).toBe('nearly');
+    expect(t.mode).toBe('typed');
     expect(t.delivery).toBeNull();
     expect(t.appliedFromFeedback).toEqual([
       { text: 'State the result', state: 'done', detail: 'Said 20%' },

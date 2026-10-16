@@ -8,7 +8,6 @@ import {
   type CardCategory,
   type Prisma,
 } from '../src/generated/prisma/client.js';
-import { DEFAULT_PROMPTS } from '../src/modules/ai/prompts/defaults.js';
 import { workspaceSettingsSchema } from '../src/modules/settings/settings.schema.js';
 import {
   ADMIN_ROLES,
@@ -16,7 +15,6 @@ import {
   ADMIN_USERS,
   ADMIN_WORKSPACE_SETTINGS,
   DEFAULT_ROLE_SETTINGS,
-  SYSTEM_SAVED_FILTERS,
   type FixtureRubric,
 } from './seed-data/admin-ui.js';
 import {
@@ -25,6 +23,11 @@ import {
   UI_ROLES,
   type UiCard,
 } from './seed-data/candidate-ui.js';
+import {
+  ensurePromptVersions,
+  ensureWorkspaceSettings,
+  syncSystemSavedFilters,
+} from './system-seed.js';
 
 const TIP_MAX = 90;
 
@@ -268,55 +271,15 @@ async function main() {
       }
     }
 
-    // System saved filters
-    for (const f of SYSTEM_SAVED_FILTERS) {
-      const existing = await prisma.savedFilter.findFirst({
-        where: { adminId: null, label: f.label },
-      });
-      const data = {
-        query: f.query as Prisma.InputJsonValue,
-        isDefault: f.isDefault,
-      };
-      if (existing)
-        await prisma.savedFilter.update({ where: { id: existing.id }, data });
-      else
-        await prisma.savedFilter.create({
-          data: { label: f.label, adminId: null, ...data },
-        });
-      counts.filters++;
-    }
-
-    // Workspace settings: created once, never overwritten (admins may have changed them).
-    await prisma.workspaceSettings.upsert({
-      where: { id: 1 },
-      create: {
-        id: 1,
-        data: workspaceSettingsSchema.parse(
-          ADMIN_WORKSPACE_SETTINGS,
-        ) as Prisma.InputJsonValue,
-      },
-      update: {},
-    });
-
-    // Prompt versions: version 1, active, for any role that has none.
-    for (const p of DEFAULT_PROMPTS) {
-      const any = await prisma.promptVersion.findFirst({
-        where: { role: p.role },
-      });
-      if (any) continue;
-      await prisma.promptVersion.create({
-        data: {
-          role: p.role,
-          version: 1,
-          model: p.model,
-          temperature: p.temperature,
-          thinkingLevel: p.thinkingLevel,
-          template: p.template,
-          active: true,
-        },
-      });
-      counts.prompts++;
-    }
+    // System saved filters, then workspace settings (created once, never overwritten: admins may
+    // have changed them), then version 1 of each prompt role that has none.
+    const filters = await syncSystemSavedFilters(prisma);
+    counts.filters = filters.created + filters.updated;
+    await ensureWorkspaceSettings(
+      prisma,
+      workspaceSettingsSchema.parse(ADMIN_WORKSPACE_SETTINGS),
+    );
+    counts.prompts = (await ensurePromptVersions(prisma)).created;
 
     console.log(`Seed complete: ${JSON.stringify(counts)}`);
   } finally {

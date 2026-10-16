@@ -49,6 +49,7 @@ export type AdminFlashCard = {
   category: FlashCard['category'];
   question: string;
   strongAnswerPoints: string[];
+  sampleAnswerOutline: string | null;
   tip: string;
   commonMistakes: string[];
   status: 'ai_draft' | 'approved';
@@ -102,6 +103,8 @@ export type CandidateFlashCard = {
   category: string;
   question: string;
   strong: string[];
+  /** The sample answer outline (FR-ROLE-03), or null. */
+  outline: string | null;
   tip: string;
   mistakes: string[];
 };
@@ -133,6 +136,7 @@ export function toAdminCard(card: FlashCard): AdminFlashCard {
     category: card.category,
     question: card.question,
     strongAnswerPoints: card.strongAnswerPoints,
+    sampleAnswerOutline: card.sampleAnswerOutline,
     tip: card.tip,
     commonMistakes: card.commonMistakes,
     status: contentStatus(card.status),
@@ -168,6 +172,7 @@ export function toCandidateCard(card: FlashCard): CandidateFlashCard {
     category: CATEGORY_LABELS[card.category],
     question: card.question,
     strong: card.strongAnswerPoints,
+    outline: card.sampleAnswerOutline,
     tip: card.tip,
     mistakes: card.commonMistakes,
   };

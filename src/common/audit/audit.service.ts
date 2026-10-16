@@ -7,7 +7,7 @@ type Db = PrismaService | Prisma.TransactionClient;
 
 export type AuditInput = {
   actorId: string | null;
-  /** The admin UI's action string, as-is ("Approved role", "Sent 3 invites"). */
+  /** A fixed action string per kind ("Approved role", "Sent invites"); counts go in itemLabel. */
   action: string;
   /** Table-ish name of the thing acted on ("job_role", "user", "workspace_settings"). */
   entity: string;

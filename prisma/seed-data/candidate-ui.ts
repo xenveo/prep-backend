@@ -1,5 +1,6 @@
 // Copied from prep-candidate-ui/lib/data/{roles,cards,questions}.ts. Category labels are the UI's;
-// prisma/seed.ts maps them to the CardCategory enum.
+// prisma/seed.ts maps them to the CardCategory enum. Question card links differ from the UI mock
+// where its cardId pointed at an unrelated card: the linked card is the question's default rubric.
 
 export type UiRole = { slug: string; title: string; blurb: string };
 export type UiCard = {
@@ -563,15 +564,15 @@ export const UI_QUESTIONS: Record<string, UiQuestion[]> = {
     },
     {
       text: 'Tell me about a time you found something surprising in a set of data. What did you do?',
-      cardPosition: 3,
+      cardPosition: 4,
     },
     {
       text: 'How would you check that a dataset is clean before you analyse it?',
-      cardPosition: 5,
+      cardPosition: 2,
     },
     {
       text: "Tell me about a time you explained numbers to someone who isn't technical.",
-      cardPosition: 8,
+      cardPosition: 5,
     },
     {
       text: 'How do you decide what to do first when several requests arrive at once?',
@@ -585,19 +586,19 @@ export const UI_QUESTIONS: Record<string, UiQuestion[]> = {
     },
     {
       text: 'Tell me about a time you were turned down. What did you do next?',
-      cardPosition: 3,
+      cardPosition: 2,
     },
     {
       text: 'How would you start a conversation with someone who has never heard of us?',
-      cardPosition: 5,
+      cardPosition: 3,
     },
     {
       text: 'Tell me about a time you kept going on a hard goal.',
-      cardPosition: 8,
+      cardPosition: 6,
     },
     {
       text: 'How do you stay motivated after a day of hearing no?',
-      cardPosition: 10,
+      cardPosition: 11,
     },
   ],
   'customer-support-associate': [

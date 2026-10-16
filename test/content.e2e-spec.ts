@@ -162,13 +162,32 @@ describe('Content (e2e)', () => {
       .set('Cookie', admin)
       .send({ ...cardInput(2), tip: 'x'.repeat(91) })
       .expect(400);
+    await http()
+      .post(`/api/admin/roles/${role.id}/cards`)
+      .set('Cookie', admin)
+      .send({ ...cardInput(2), sampleAnswerOutline: 'x'.repeat(1001) })
+      .expect(400);
     const c2 = (
       await http()
         .post(`/api/admin/roles/${role.id}/cards`)
         .set('Cookie', admin)
-        .send(cardInput(2))
+        .send({ ...cardInput(2), sampleAnswerOutline: '  Situation, action  ' })
         .expect(201)
     ).body;
+    expect(c1.sampleAnswerOutline).toBeNull();
+    expect(c2.sampleAnswerOutline).toBe('Situation, action');
+    const outlined = await http()
+      .put(`/api/admin/cards/${c1.id}`)
+      .set('Cookie', admin)
+      .send({ ...cardInput(1), sampleAnswerOutline: 'Task, result' })
+      .expect(200);
+    expect(outlined.body.sampleAnswerOutline).toBe('Task, result');
+    // Omitting the field leaves the outline as it is.
+    await http()
+      .put(`/api/admin/cards/${c1.id}`)
+      .set('Cookie', admin)
+      .send(cardInput(1))
+      .expect(200);
 
     const drafted = await http()
       .post(`/api/admin/roles/${role.id}/cards/draft-ai`)
@@ -343,9 +362,14 @@ describe('Content (e2e)', () => {
       category: 'Behavioural',
       question: d3.question,
       strong: d3.strongAnswerPoints,
+      outline: d3.sampleAnswerOutline,
       tip: d3.tip,
       mistakes: d3.commonMistakes,
     });
+    expect(study.cards.map((c: any) => c.outline).slice(1)).toEqual([
+      'Situation, action',
+      'Task, result',
+    ]);
     await http()
       .post(`/api/roles/${slug}/cards/1/view`)
       .set('Cookie', candidate)

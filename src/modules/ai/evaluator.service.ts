@@ -181,7 +181,14 @@ export class EvaluatorService {
       detailText,
       (o) => genericDetail(o, first),
     );
-    return { output, promptVersion: prompt.version, moderation };
+    return {
+      output: {
+        ...output,
+        highlights: consistentHighlights(output.highlights),
+      },
+      promptVersion: prompt.version,
+      moderation,
+    };
   }
 
   /**
@@ -349,6 +356,24 @@ export function genericDetail(
     highlights: [],
     evidence: o.evidence.map((e) => ({ ...e, note: '' })),
   };
+}
+
+/**
+ * A rubric key point is met or not, never both: a "match" is dropped when an "issue" names the same
+ * key point. The prompt asks for this too; this enforces the part that can be checked.
+ */
+export function consistentHighlights(
+  highlights: EvaluatorDetailOutput['highlights'],
+): EvaluatorDetailOutput['highlights'] {
+  const flagged = new Set(
+    highlights.filter((h) => h.kind === 'issue').map((h) => h.rubric_point_id),
+  );
+  return highlights.filter(
+    (h) =>
+      h.kind !== 'match' ||
+      !h.rubric_point_id ||
+      !flagged.has(h.rubric_point_id),
+  );
 }
 
 /** Attempt 1 drops any `applied`; attempt 2 uses the original point wording. */

@@ -2,7 +2,9 @@
 
 What the services need in order to be deployed, observed and trusted. Sentry is out of scope (user decision).
 
-## Container images
+## Container images (dropped 2026-10-16)
+
+> **Decision:** the user hosts manually on a Hetzner server, with no containers. The Dockerfile was removed. `docs/DEPLOYMENT.md` covers the systemd-based deploy (Node 24, Caddy, Postgres, Redis, Hetzner Object Storage). The text below is kept for history.
 
 The user will host this manually. This phase delivers what a manual deploy needs: an image, documented env vars and a runbook. It provisions no infrastructure. There's no `Dockerfile` today. Add one multi-stage `Dockerfile` that builds a single image used for both processes:
 - **build stage:** `npm ci`, `prisma generate`, `nest build`;
