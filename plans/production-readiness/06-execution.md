@@ -70,10 +70,10 @@ Update this table as tasks land: status, evidence, and any deviations.
 | G-STT | backend Coder | done 2026-10-16 (`253da57`) | Chrome webm/opus accepted as-is (0% WER on a corpus clip); live voice transcription 3.4–4.1 s for 13–22 s answers |
 | G-TTS | backend Coder | done 2026-10-16 (`253da57`) | gemini-3.8-flash-tts WAV 24 kHz; voices en-in-podcaster-7 / charon / en-in-tutor-11; first generation 3.3–3.9 s, cached 3–11 ms |
 | G-EVAL (split evaluator) | backend Coder | done 2026-10-16 (`253da57`) | Written feedback (server) typed 4.3–4.7 s, voice 8.2–9.2 s; spoken feedback ready 18–23 s; completion (summariser) 7–10.4 s |
-| Candidate pause meter | candidate agent | done 2026-10-16 (uncommitted) | AudioWorklet meter; matched corpus truth within 0.1 s (a2, a4, L1); values flow into wpm and pauses |
-| P3 acceptance | Coordinator + UI agents | partly done 2026-10-16 | Real-Gemini browser run passed (voice retry/skip, typed, card and question audio, completion, admin review, AI config, voice samples). Follow-ups: candidate UI waits on polling (WS wake fix in progress); TTS WAV is about 48 KB/s (opus/mp3 needs an encoder decision); an evaluator matched/issue contradiction (logged for OPS-CAL); abandoned sessions consume session numbers (product question, with PD4). Still to do: real human voices and noise, cost per real session |
+| Candidate pause meter | candidate agent | done 2026-10-16 (candidate `kartik` commit) | AudioWorklet meter; matched corpus truth within 0.1 s (a2, a4, L1); values flow into wpm and pauses |
+| P3 acceptance | Coordinator + UI agents | partly done 2026-10-16 | Real-Gemini browser run passed (voice retry/skip, typed, card and question audio, completion, admin review, AI config, voice samples). WS wake fix done (UI shows written feedback about 0.4 s after the server). Follow-ups: TTS WAV is about 48 KB/s (opus/mp3 needs an encoder decision); an evaluator matched/issue contradiction (logged for OPS-CAL); abandoned sessions consume session numbers (product question, with PD4). Still to do: real human voices and noise, cost per real session |
 | P4-COST / P4-CONTENT / P4-DATA | backend Coders | pending | |
 | F1–F3, PD2–PD3 (admin) | admin agent | pending | |
-| B1–B2, PD3–PD4 (candidate) | candidate agent | pending | |
+| B1–B3, PD3–PD4 (candidate) | candidate agent | pending | |
 | F4–F7 | — | deferred after R1 | |
 | OPS-IMAGE / CI / CAL / LOAD / API | backend Coder | pending | OPS-CI: make the privacy e2e wait on jobs instead of the in-memory `drain()`. Readiness endpoint failing on Redis down (open from REDIS) |
