@@ -62,7 +62,9 @@ function attemptRow(over: Partial<Attempt> = {}): Attempt {
   };
 }
 
-function setup(opts: { sessionStatus?: string } = {}) {
+function setup(
+  opts: { sessionStatus?: string; followUpEnabled?: boolean } = {},
+) {
   const attempts = new Map<string, Attempt>();
   const session = {
     status: opts.sessionStatus ?? 'in_progress',
@@ -71,7 +73,10 @@ function setup(opts: { sessionStatus?: string } = {}) {
       sessionWeights: DEFAULT_ROLE_SETTINGS.sessionWeights,
       dimensionWeights: DEFAULT_ROLE_SETTINGS.dimensionWeights,
     },
-    role: { title: 'Customer Support Associate' },
+    role: {
+      title: 'Customer Support Associate',
+      settings: { followUpEnabled: opts.followUpEnabled ?? false },
+    },
   };
   const sq = {
     position: 2,
@@ -529,9 +534,8 @@ describe('AttemptPipelineService', () => {
     expect(t.session.currentQuestion).toBe(3);
   });
 
-  it('attempt 1 follow-up is saved on the session question and pushed', async () => {
-    const t = setup();
-    t.addTyped();
+  /** Primes the next evaluator reply with the fake's canned output plus a follow-up. */
+  async function primeFollowUp(t: ReturnType<typeof setup>, followUp: string) {
     const canned = await t.llm.json({
       tag: 'evaluator',
       model: 'm',
@@ -543,13 +547,58 @@ describe('AttemptPipelineService', () => {
     t.llm.reset();
     t.llm.setNext('evaluator', {
       ...(canned.output as object),
-      follow_up: 'What did you do next?',
+      follow_up: followUp,
     });
+  }
+
+  it('follow-up enabled: attempt 1 probe is saved on the session question and pushed', async () => {
+    const t = setup({ followUpEnabled: true });
+    t.addTyped();
+    await primeFollowUp(t, '  What did you do next?  ');
     await t.service.processAttempt('att-1');
+    const sent = t.llm.calls[0].messages[0].content;
+    expect(sent).toContain('A follow-up is allowed');
     expect(t.sq.followUpText).toBe('What did you do next?');
     expect(t.events.find((e) => e.type === 'attempt.evaluated').followUp).toBe(
       'What did you do next?',
     );
+    const feedback = t.attempts.get('att-1')!.feedback as StoredFeedback;
+    expect(feedback.followUp).toBe('What did you do next?');
+  });
+
+  it('follow-up disabled (default): a probe from the model is dropped', async () => {
+    const t = setup();
+    t.addTyped();
+    await primeFollowUp(t, 'What did you do next?');
+    await t.service.processAttempt('att-1');
+    const sent = t.llm.calls[0].messages[0].content;
+    expect(sent).toContain('Do not ask a follow-up question.');
+    expect(t.sq.followUpText).toBeNull();
+    expect(
+      t.events.find((e) => e.type === 'attempt.evaluated').followUp,
+    ).toBeNull();
+    const feedback = t.attempts.get('att-1')!.feedback as StoredFeedback;
+    expect(feedback.followUp).toBeNull();
+  });
+
+  it('attempt 2 answers the probe: it is sent as context and no new probe is asked', async () => {
+    const t = setup({ followUpEnabled: true });
+    t.addTyped();
+    await primeFollowUp(t, 'Can you give a <specific> example?');
+    await t.service.processAttempt('att-1');
+    t.events.length = 0;
+    await primeFollowUp(t, 'Another probe?');
+    t.addTyped({ id: 'att-2', attemptNo: 2, idempotencyKey: 'k2' });
+    await t.service.processAttempt('att-2');
+    const sent = t.llm.calls[0].messages[0].content;
+    expect(sent).toContain(
+      '<follow_up>Can you give a &lt;specific&gt; example?</follow_up>',
+    );
+    expect(sent).toContain('Do not ask a follow-up question.');
+    expect(
+      t.events.find((e) => e.type === 'attempt.evaluated').followUp,
+    ).toBeNull();
+    expect(t.sq.followUpText).toBe('Can you give a <specific> example?');
   });
 
   it('evaluator failure: failed + ai_unavailable, attempt.failed offers text mode for voice', async () => {

@@ -242,6 +242,49 @@ describe('EvaluatorService', () => {
     ).toBe(true);
   });
 
+  it('keeps a follow-up only when the role allows one on attempt 1', async () => {
+    const { llm, service } = setup();
+    llm.setNext('evaluator', output({ follow_up: ' Which customer? ' }));
+    const allowed = await service.evaluate(input({ followUpAllowed: true }));
+    expect(allowed.output.follow_up).toBe('Which customer?');
+    expect(llm.calls[0].messages[0].content).toContain(
+      'A follow-up is allowed',
+    );
+
+    llm.setNext('evaluator', output({ follow_up: 'Which customer?' }));
+    const off = await service.evaluate(input());
+    expect(off.output.follow_up).toBeNull();
+    expect(llm.calls[1].messages[0].content).toContain(
+      'Do not ask a follow-up question.',
+    );
+  });
+
+  it('sends the asked follow-up with attempt 2 and never asks another', async () => {
+    const { llm, service } = setup();
+    llm.setNext(
+      'evaluator',
+      output({
+        follow_up: 'Another?',
+        applied: [
+          { point: 'End with the result', status: 'applied', evidence: 'x' },
+          { point: "Say 'I'", status: 'partly', evidence: 'y' },
+        ],
+      }),
+    );
+    const result = await service.evaluate(
+      input({
+        attemptNo: 2,
+        previousImprovementPoints: ['End with the result', "Say 'I'"],
+        followUpAllowed: true,
+        followUpAsked: 'Which <customer>?',
+      }),
+    );
+    expect(result.output.follow_up).toBeNull();
+    expect(llm.calls[0].messages[0].content).toContain(
+      '<follow_up>Which &lt;customer&gt;?</follow_up>',
+    );
+  });
+
   it('checks previous improvement points on attempt 2 and computes learning', async () => {
     const { llm, service } = setup();
     llm.setNext(
