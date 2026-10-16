@@ -168,7 +168,15 @@ That's well under the USD 0.50 target (NFR-10).
 - **Free-tier warning:** the free tier lets Google use the content to improve its products, so production must use a paid-tier key, because candidate answers are personal data.
 - **Not covered by the corpus:** real human speech with noise and real accents, and Chrome's `audio/webm` (opus) uploads; there's no encoder on this machine. Re-check both in P3 with real recordings.
 
-### Decisions raised by P0
+### Decisions raised by P0 (decided by the user, 2026-10-16: 1a and 2a)
+
+**Decided:**
+- **Pauses** are measured in the browser while recording (1a).
+- **The evaluator is split** into a fast written-feedback call and a background call for the spoken summary and review details (2a).
+- **Transcription** uses the compact `{text, pauses}` schema. The model's pauses are ignored in favour of the browser's measurements.
+
+These change the P2 tasks below (G-STT, G-EVAL, candidate pause meter).
+
 
 1. **Pause metrics (D2).** Gemini's timings are unreliable on real-length answers. Options:
    - **(a) Recommended: measure in the browser while recording.** The candidate room already holds the mic stream. A small Web Audio level detector computes pause count, longest pause and speaking time, which are sent with the upload next to `durationSec`.
@@ -193,6 +201,8 @@ That's well under the USD 0.50 target (NFR-10).
 | **G-LLM** | `src/adapters/gemini/**` (shared client, errors, `ensureModel`), `src/adapters/llm/gemini-llm.adapter{,.spec}.ts`, provider wiring, `env.ts` Gemini keys, `.env.example`, `package.json` (`@google/genai`), prompt defaults and data migration (new versions + thinking level), the AI-config model check | P0 |
 | **G-STT** | `src/adapters/stt/gemini-stt.adapter{,.spec}.ts`, the container-duration parser; for Outcome B also `scoring/metrics.ts`, `scoring/delivery.ts` and their specs | G-LLM, spike |
 | **G-TTS** | `src/adapters/tts/gemini-tts.adapter{,.spec}.ts`, voice table, WAV duration helper, `tts-cache.service.ts`, the voice-sample route, the mime map | G-LLM |
-| Candidate UI | null-metric rendering (Outcome B), WAV playback check | G-STT, G-TTS |
+| **G-EVAL** | Split the evaluator, in `src/modules/ai/evaluator.service.ts`, `schemas.ts`, the prompt defaults (two evaluator prompt roles, or one role with two templates; decide in the brief), the pipeline publishing `attempt.evaluated` after call 1, and the spoken summary/TTS and highlights after call 2 | G-LLM |
+| Candidate UI | **Pause meter:** a Web Audio level detector during recording that sends `pauseCount`, `longestPauseSec` and `speakingSec` with the upload. Plus WAV playback check | G-STT (upload fields) |
+| Backend (with G-STT) | Accept the optional pause fields in the attempt multipart (Zod-validated, clamped to the duration), store them on the attempt, and compute wpm from transcript words ÷ speaking time | — |
 
 G-LLM owns the shared files: `env.ts`, `package.json` and the wiring. G-STT and G-TTS run in parallel after it, and hand their env and wiring additions to the Coordinator.

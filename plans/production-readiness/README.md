@@ -28,7 +28,9 @@ Date: 2026-10-16. Follows [INTEGRATION_PROGRESS.md](../../INTEGRATION_PROGRESS.m
 
 | ID | Topic | Decision |
 | --- | --- | --- |
-| D2 | **Delivery metrics with Gemini** | The P0 spike decides it ([01](01-gemini.md#p0-spike-before-p2)). If `gemini-3.8-flash` word timestamps are accurate enough, keep pace, fillers and pauses. Otherwise pace and fillers come from the transcript and the measured duration, and pauses show as unavailable. No further user input is needed. |
+| D2 | **Delivery metrics with Gemini** | Decided after P0. Gemini transcribes accurately (compact transcript), but its pause timing is unreliable on real-length answers. **Pauses are measured in the candidate's browser while recording** and uploaded with the answer. Pace and fillers come from the transcript. |
+| D6 | **Feedback latency** | P0 measured about 11–15 s against the 8 s target. **The evaluator is split:** a fast call for the feedback panel, then a background call for the spoken summary and admin-review details. |
+| D7 | **Dev email allowlist** | Real mail goes only to `kartik.pavan@atrox.io`. Everything else goes to the local outbox. |
 | D3 | **Product changes from acceptance** | All four are adopted as R1 work items PD1–PD4 in [04](04-feature-gaps.md#product-changes-pd1pd4): stable audit action keys, per-role progress, a "Clarity (written)" label for typed answers, and abandoned sessions with an answer counting toward the limit. |
 | D5 | **R1 scope** | In R1: F1 cost view, F2 voice in the admin test interview, F3 sample answer outline, and bugs B1–B2, together with PD1–PD4. Deferred until after R1: F4 follow-up question, F5 PDF report, F6 live transcript, F7 privacy request status. Later: F8 saved-filter delete, F9 session-complete email. |
 
