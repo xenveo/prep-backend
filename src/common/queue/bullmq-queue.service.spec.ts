@@ -28,12 +28,14 @@ vi.mock('bullmq', () => ({
   Queue: class {
     getJob = mocks.getJob;
     add = mocks.add;
+    on = vi.fn();
     constructor(name: string, opts: { prefix?: string }) {
       mocks.queues.push({ name, opts });
     }
   },
   QueueEvents: class {
     waitUntilReady = () => Promise.resolve();
+    on = vi.fn();
     constructor(name: string, opts: { prefix?: string }) {
       mocks.events.push({ name, opts });
     }

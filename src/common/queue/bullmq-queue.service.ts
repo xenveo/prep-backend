@@ -215,6 +215,9 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
         connection: this.redis.client!,
         prefix: this.redis.prefix,
       });
+      queue.on('error', (err) =>
+        this.logger.error(`Queue error: queue=${name} (${err.name})`),
+      );
       this.queues.set(name, queue);
     }
     return queue;
@@ -227,6 +230,9 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
         connection: this.redis.duplicate({ maxRetriesPerRequest: null }),
         prefix: this.redis.prefix,
       });
+      events.on('error', (err) =>
+        this.logger.error(`QueueEvents error: queue=${name} (${err.name})`),
+      );
       this.events.set(name, events);
     }
     return events;
