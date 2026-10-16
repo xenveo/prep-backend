@@ -1,6 +1,7 @@
 import {
   draftCardsOutputSchema,
   draftQuestionsOutputSchema,
+  evaluatorDetailOutputSchema,
   evaluatorOutputSchema,
   summariserOutputSchema,
 } from '../../modules/ai/schemas.js';
@@ -31,6 +32,14 @@ describe('FakeLlmAdapter', () => {
     expect(llm.calls).toHaveLength(2);
     expect(short.provider).toBe('fake');
     expect(short.usage.costUsd).toBe(0);
+  });
+
+  it('returns schema-valid evaluator_detail output quoting the answer', async () => {
+    const llm = new FakeLlmAdapter();
+    const res = await llm.json(req('evaluator_detail', answer(3)));
+    const d = evaluatorDetailOutputSchema.parse(res.output);
+    expect(d.highlights[0].quote).toBe('word word word');
+    expect(d.evidence[0].quote).toBe('word word word');
   });
 
   it('echoes improvement points as applied on attempt 2', async () => {

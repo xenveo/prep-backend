@@ -20,6 +20,7 @@ export type ActivePrompt = {
 export type PromptVersionSnapshot = {
   interviewer: number;
   evaluator: number;
+  evaluator_detail: number;
   summariser: number;
 };
 
@@ -59,14 +60,17 @@ export class PromptService {
 
   /** Active versions stored on a new session (Session.promptVersions). */
   async snapshotVersions(): Promise<PromptVersionSnapshot> {
-    const [interviewer, evaluator, summariser] = await Promise.all([
-      this.getActive('interviewer'),
-      this.getActive('evaluator'),
-      this.getActive('summariser'),
-    ]);
+    const [interviewer, evaluator, evaluatorDetail, summariser] =
+      await Promise.all([
+        this.getActive('interviewer'),
+        this.getActive('evaluator'),
+        this.getActive('evaluator_detail'),
+        this.getActive('summariser'),
+      ]);
     return {
       interviewer: interviewer.version,
       evaluator: evaluator.version,
+      evaluator_detail: evaluatorDetail.version,
       summariser: summariser.version,
     };
   }

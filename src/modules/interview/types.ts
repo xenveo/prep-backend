@@ -80,8 +80,9 @@ export type Word = { w: string; start: number; end: number };
 export type VoiceMetrics = {
   wpm: number;
   fillerCount: number;
-  pauseCount: number;
-  longestPauseS: number;
+  /** Null when pauses were not measured (no browser measurement and no word timestamps). */
+  pauseCount: number | null;
+  longestPauseS: number | null;
   durationS: number;
 };
 
@@ -124,14 +125,16 @@ export type StoredFeedback = {
   focus: string[];
   improvementPoints: string[];
   deliveryNotes: string;
+  /** "" until the detail evaluation (call 2) is merged in. */
   spokenSummary: string;
   followUp: string | null;
   /** Attempt 2 only; [] on attempt 1. */
   applied: StoredAppliedItem[];
+  /** [] until the detail evaluation (call 2) is merged in, or when it failed. */
   highlights: StoredHighlight[];
   /** [] for typed answers. */
   delivery: DeliveryMetric[];
-  /** Spoken feedback length in seconds. */
+  /** Spoken feedback length in seconds; 0 until there is a spoken summary. */
   audioSeconds: number;
 };
 

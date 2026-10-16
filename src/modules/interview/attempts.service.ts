@@ -18,6 +18,7 @@ import {
   AUDIO_EXTENSIONS,
   type AttemptStatusView,
   type SubmitAttemptBody,
+  uploadedVoiceMetrics,
 } from './interview.schemas.js';
 import {
   toAppliedItems,
@@ -43,6 +44,7 @@ const RESULT_RESET = {
   fillerCount: null,
   pauseCount: null,
   longestPauseS: null,
+  speakingS: null,
   dimensionScores: Prisma.DbNull,
   score: null,
   learningScore: null,
@@ -135,6 +137,7 @@ export class AttemptsService {
       audioKey,
       audioExpiresAt,
       durationS: body.durationSec,
+      ...uploadedVoiceMetrics(body),
       submittedAt,
     };
 

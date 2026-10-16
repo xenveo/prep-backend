@@ -72,6 +72,8 @@ function canned(req: LlmJsonRequest): unknown {
   switch (req.tag) {
     case 'evaluator':
       return evaluator(user);
+    case 'evaluator_detail':
+      return evaluatorDetail(user);
     case 'summariser':
       return summariser(user);
     case 'interviewer':
@@ -87,15 +89,18 @@ function canned(req: LlmJsonRequest): unknown {
   }
 }
 
-/** Levels grow with answer length so tests can see different scores. */
-function evaluator(user: string) {
+function answerWords(user: string): string[] {
   const answer =
     /<candidate_answer>\n?([\s\S]*?)\n?<\/candidate_answer>/.exec(user)?.[1] ??
     '';
-  const words = answer.split(/\s+/).filter(Boolean);
+  return answer.split(/\s+/).filter(Boolean);
+}
+
+/** Levels grow with answer length so tests can see different scores. */
+function evaluator(user: string) {
+  const words = answerWords(user);
   const level =
     words.length < 20 ? 2 : words.length < 60 ? 3 : words.length < 120 ? 4 : 5;
-  const quote = words.slice(0, 8).join(' ') || 'No answer';
   const points = [
     ...user.matchAll(/<improvement_point>([\s\S]*?)<\/improvement_point>/g),
   ].map((m) => unescapeXml(m[1]));
@@ -106,9 +111,6 @@ function evaluator(user: string) {
       delivery: level,
       relevance: Math.min(5, level + 1),
     },
-    evidence: [
-      { dimension: 'content', quote, note: 'Shows the main example.' },
-    ],
     worked: [
       'You gave a real example from your own work.',
       'Your tone was calm and friendly.',
@@ -117,8 +119,6 @@ function evaluator(user: string) {
     opener: 'In my last role, a customer was upset about…',
     improvement_points: ['End with the result', "Say 'I' not 'we'"],
     delivery_notes: 'A steady pace that is easy to follow.',
-    spoken_summary:
-      'Nice work. You used a real example. Next time, end with the result.',
     follow_up: null,
     ...(points.length
       ? {
@@ -132,8 +132,19 @@ function evaluator(user: string) {
           })),
         }
       : {}),
+  };
+}
+
+function evaluatorDetail(user: string) {
+  const quote = answerWords(user).slice(0, 8).join(' ') || 'No answer';
+  return {
+    spoken_summary:
+      'Nice work. You used a real example. Next time, end with the result.',
     highlights: [
       { quote, kind: 'match', note: 'Clear opening.', rubric_point_id: 'kp1' },
+    ],
+    evidence: [
+      { dimension: 'content', quote, note: 'Shows the main example.' },
     ],
   };
 }

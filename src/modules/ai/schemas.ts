@@ -24,6 +24,7 @@ export const expectedStructureSchema = z.enum([
   'free',
 ]);
 
+/** Evaluator call 1: scores and the written feedback panel (01-gemini decision 2a). */
 export const evaluatorOutputSchema = z.object({
   dimension_scores: z.object({
     content: level,
@@ -31,15 +32,11 @@ export const evaluatorOutputSchema = z.object({
     delivery: level,
     relevance: level,
   }),
-  evidence: z.array(
-    z.object({ dimension: dimensionSchema, quote: text, note: z.string() }),
-  ),
   worked: z.array(text).min(1).max(4),
   improve: z.array(text).min(1).max(4),
   opener: text,
   improvement_points: z.array(text).min(2).max(3),
   delivery_notes: z.string(),
-  spoken_summary: text,
   follow_up: z.string().nullable(),
   applied: z
     .array(
@@ -50,6 +47,12 @@ export const evaluatorOutputSchema = z.object({
       }),
     )
     .optional(),
+});
+export type EvaluatorOutput = z.infer<typeof evaluatorOutputSchema>;
+
+/** Evaluator call 2: the spoken summary and the review details, after the written feedback is out. */
+export const evaluatorDetailOutputSchema = z.object({
+  spoken_summary: text,
   highlights: z.array(
     z.object({
       quote: text,
@@ -58,8 +61,11 @@ export const evaluatorOutputSchema = z.object({
       rubric_point_id: z.string().optional(),
     }),
   ),
+  evidence: z.array(
+    z.object({ dimension: dimensionSchema, quote: text, note: z.string() }),
+  ),
 });
-export type EvaluatorOutput = z.infer<typeof evaluatorOutputSchema>;
+export type EvaluatorDetailOutput = z.infer<typeof evaluatorDetailOutputSchema>;
 
 const summaryPoint = z.object({
   text,

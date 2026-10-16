@@ -21,7 +21,6 @@ export type ReviewAttempt = Pick<
   | 'feedback'
   | 'wpm'
   | 'fillerCount'
-  | 'pauseCount'
   | 'longestPauseS'
 >;
 
@@ -45,11 +44,7 @@ export function toTry(a: ReviewAttempt, audioUrl: string | null): Try {
   const feedback = a.feedback as Partial<StoredFeedback> | null;
   const score = a.score ?? 0;
   const seconds = Math.round(a.durationS ?? 0);
-  const voice =
-    a.wpm !== null &&
-    a.fillerCount !== null &&
-    a.pauseCount !== null &&
-    a.longestPauseS !== null;
+  const voice = a.wpm !== null && a.fillerCount !== null;
   const out: Try = {
     attempt: a.attemptNo === 2 ? 2 : 1,
     score,
@@ -69,9 +64,7 @@ export function toTry(a: ReviewAttempt, audioUrl: string | null): Try {
       ? toAdminDelivery({
           wpm: a.wpm!,
           fillerCount: a.fillerCount!,
-          pauseCount: a.pauseCount!,
-          longestPauseS: a.longestPauseS!,
-          durationS: a.durationS ?? 0,
+          longestPauseS: a.longestPauseS,
         })
       : null,
     audioUrl,

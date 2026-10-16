@@ -1,11 +1,16 @@
 import type { StorageAdapter } from '../../adapters/storage/storage.adapter.js';
 import type { AppError } from '../../common/errors/app-error.js';
 import type { QueueService } from '../../common/queue/queue.types.js';
+import { ZodPipe } from '../../common/validation/zod.pipe.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { TtsCacheService } from '../content/tts-cache.service.js';
 import type { SettingsService } from '../settings/settings.service.js';
 import type { AssignmentsService } from '../users/assignments.service.js';
 import { AttemptsService } from './attempts.service.js';
+import {
+  submitAttemptSchema,
+  uploadedVoiceMetrics,
+} from './interview.schemas.js';
 import {
   attempt,
   loadedSession,
@@ -127,6 +132,54 @@ describe('AttemptsService.submit', () => {
     const days =
       (data.audioExpiresAt.getTime() - data.submittedAt.getTime()) / 864e5;
     expect(days).toBe(30);
+  });
+
+  it('stores browser-measured pause metrics on a voice attempt, clamped to the duration', async () => {
+    const { service, prisma } = setup();
+    await service.submit(
+      USER_ID,
+      SESSION_ID,
+      qid(1),
+      'k1',
+      submitAttemptSchema.parse({
+        attemptNo: '1',
+        mode: 'voice',
+        durationSec: '50',
+        pauseCount: '4',
+        longestPauseSec: '2.5',
+        speakingSec: '61.2',
+      }),
+      { buffer: Buffer.from('abc'), mimetype: 'audio/webm' },
+    );
+    expect(prisma.attempt.create.mock.calls[0][0].data).toMatchObject({
+      durationS: 50,
+      pauseCount: 4,
+      longestPauseS: 2.5,
+      speakingS: 50,
+    });
+  });
+
+  it('ignores pause metrics on a typed attempt and clears them on resubmission', async () => {
+    const failed = attempt(1, 1, {
+      status: 'failed',
+      idempotencyKey: 'old',
+      pauseCount: 3,
+      speakingS: 12,
+    });
+    const { service, prisma } = setup(loadedSession(2, [failed]));
+    await service.submit(
+      USER_ID,
+      SESSION_ID,
+      qid(1),
+      'new',
+      { ...typed(1), pauseCount: 3, longestPauseSec: 1, speakingSec: 12 },
+      undefined,
+    );
+    expect(prisma.attempt.update.mock.calls[0][0].data).toMatchObject({
+      pauseCount: null,
+      longestPauseS: null,
+      speakingS: null,
+    });
   });
 
   it('rejects voice without audio or with an unknown type', async () => {
@@ -267,6 +320,88 @@ describe('AttemptsService.submit', () => {
         )
       ).status,
     ).toBe(409);
+  });
+});
+
+describe('submitAttemptSchema pause fields', () => {
+  const base = { attemptNo: '1', mode: 'voice', durationSec: '40' };
+
+  it('coerces the optional multipart strings', () => {
+    expect(
+      submitAttemptSchema.parse({
+        ...base,
+        pauseCount: '3',
+        longestPauseSec: '1.8',
+        speakingSec: '31.5',
+      }),
+    ).toMatchObject({ pauseCount: 3, longestPauseSec: 1.8, speakingSec: 31.5 });
+    const bare = submitAttemptSchema.parse(base);
+    expect(bare.pauseCount).toBeUndefined();
+    expect(bare.speakingSec).toBeUndefined();
+  });
+
+  it('requires durationSec > 0 for a voice answer, not for a typed one', () => {
+    for (const durationSec of [undefined, '0']) {
+      const r = submitAttemptSchema.safeParse({ ...base, durationSec });
+      expect(r.success).toBe(false);
+      expect(r.error?.issues).toEqual([
+        expect.objectContaining({
+          path: ['durationSec'],
+          message: 'required for a voice answer',
+        }),
+      ]);
+    }
+    expect(
+      submitAttemptSchema.safeParse({
+        attemptNo: '1',
+        mode: 'typed',
+        text: 'Typed.',
+      }).success,
+    ).toBe(true);
+    expect(() =>
+      new ZodPipe(submitAttemptSchema).transform({ ...base, durationSec: '0' }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'validation_failed',
+        status: 400,
+        message: 'durationSec: required for a voice answer',
+      }),
+    );
+  });
+
+  it.each([
+    ['pauseCount', '-1'],
+    ['pauseCount', '1.5'],
+    ['pauseCount', 'x'],
+    ['longestPauseSec', '-0.1'],
+    ['speakingSec', '0'],
+    ['speakingSec', '301'],
+  ])('rejects %s = %s', (field, value) => {
+    expect(
+      submitAttemptSchema.safeParse({ ...base, [field]: value }).success,
+    ).toBe(false);
+  });
+
+  it('clamps the times to durationSec, and drops everything for typed answers', () => {
+    const voice = submitAttemptSchema.parse({
+      ...base,
+      pauseCount: '2',
+      longestPauseSec: '55',
+      speakingSec: '45',
+    });
+    expect(uploadedVoiceMetrics(voice)).toEqual({
+      pauseCount: 2,
+      longestPauseS: 40,
+      speakingS: 40,
+    });
+    expect(uploadedVoiceMetrics(submitAttemptSchema.parse(base))).toEqual({
+      pauseCount: null,
+      longestPauseS: null,
+      speakingS: null,
+    });
+    expect(
+      uploadedVoiceMetrics({ ...voice, mode: 'typed', text: 'Typed.' }),
+    ).toEqual({ pauseCount: null, longestPauseS: null, speakingS: null });
   });
 });
 

@@ -102,28 +102,33 @@ function pauses(count: number, t: DeliveryTarget): DeliveryMetric {
   };
 }
 
-/** Candidate UI `DeliveryMetric[3]` (pace, fillers, pauses). Typed answers (null metrics) → []. */
+/**
+ * Candidate UI `DeliveryMetric[]`: pace, fillers and pauses. Pauses are omitted (not shown as 0) when
+ * they were not measured. Typed answers (null metrics) → [].
+ */
 export function toDeliveryMetrics(
   metrics: VoiceMetrics | null,
   targets: DeliveryTargets = DEFAULT_DELIVERY_TARGETS,
 ): DeliveryMetric[] {
   if (!metrics) return [];
-  return [
+  const out = [
     pace(metrics.wpm, targets.pace),
     fillers(metrics.fillerCount, targets.fillers),
-    pauses(metrics.pauseCount, targets.pauses),
   ];
+  if (metrics.pauseCount !== null)
+    out.push(pauses(metrics.pauseCount, targets.pauses));
+  return out;
 }
 
-/** Admin UI `DeliveryMetrics`. */
+/** Admin UI `DeliveryMetrics`. `longestPauseSec` is null when pauses were not measured. */
 export function toAdminDelivery(
-  metrics: VoiceMetrics,
+  metrics: Pick<VoiceMetrics, 'wpm' | 'fillerCount' | 'longestPauseS'>,
   targets: DeliveryTargets = DEFAULT_DELIVERY_TARGETS,
 ): {
   wpm: number;
   paceLabel: PaceLabel;
   fillerWords: number;
-  longestPauseSec: number;
+  longestPauseSec: number | null;
 } {
   return {
     wpm: metrics.wpm,

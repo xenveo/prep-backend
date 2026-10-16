@@ -329,7 +329,7 @@ model Session {
   bandMessage     String?       @map("band_message")
   /// {sessionWeights, dimensionWeights}
   weightsSnapshot Json          @map("weights_snapshot")
-  /// {interviewer, evaluator, summariser} -> version
+  /// {interviewer, evaluator, evaluator_detail, summariser} -> version
   promptVersions  Json          @map("prompt_versions")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
@@ -501,7 +501,7 @@ model WorkspaceSettings {
 
 model PromptVersion {
   id            String   @id @default(uuid()) @db.Uuid
-  /// interviewer | evaluator | summariser | drafter
+  /// interviewer | evaluator | evaluator_detail | summariser | drafter
   role          String
   version       Int
   model         String

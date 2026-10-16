@@ -20,9 +20,11 @@ import {
 } from './storage/storage.adapter.js';
 import { DeepgramSttAdapter } from './stt/deepgram-stt.adapter.js';
 import { FakeSttAdapter } from './stt/fake-stt.adapter.js';
+import { GeminiSttAdapter } from './stt/gemini-stt.adapter.js';
 import { STT_ADAPTER, type SttAdapter } from './stt/stt.adapter.js';
 import { ElevenLabsTtsAdapter } from './tts/elevenlabs-tts.adapter.js';
 import { FakeTtsAdapter } from './tts/fake-tts.adapter.js';
+import { GeminiTtsAdapter } from './tts/gemini-tts.adapter.js';
 import { TTS_ADAPTER, type TtsAdapter } from './tts/tts.adapter.js';
 
 function required(env: Env, key: keyof Env): string {
@@ -65,6 +67,30 @@ export function createLlmAdapter(env: Env, gemini: GeminiClient): LlmAdapter {
   }
 }
 
+export function createSttAdapter(env: Env, gemini: GeminiClient): SttAdapter {
+  switch (env.STT_PROVIDER) {
+    case 'gemini':
+      required(env, 'GEMINI_API_KEY');
+      return new GeminiSttAdapter(gemini, env.GEMINI_STT_MODEL);
+    case 'deepgram':
+      return new DeepgramSttAdapter(required(env, 'DEEPGRAM_API_KEY'));
+    default:
+      return new FakeSttAdapter();
+  }
+}
+
+export function createTtsAdapter(env: Env, gemini: GeminiClient): TtsAdapter {
+  switch (env.TTS_PROVIDER) {
+    case 'gemini':
+      required(env, 'GEMINI_API_KEY');
+      return new GeminiTtsAdapter(gemini, env.GEMINI_TTS_MODEL);
+    case 'elevenlabs':
+      return new ElevenLabsTtsAdapter(required(env, 'ELEVENLABS_API_KEY'));
+    default:
+      return new FakeTtsAdapter();
+  }
+}
+
 const providers: Provider[] = [
   {
     // Shared by every Gemini adapter; the SDK client is built on first use, so it's free when unused.
@@ -84,19 +110,15 @@ const providers: Provider[] = [
   },
   {
     provide: STT_ADAPTER,
-    inject: [AppConfig],
-    useFactory: ({ env }: AppConfig): SttAdapter =>
-      env.STT_PROVIDER === 'deepgram'
-        ? new DeepgramSttAdapter(required(env, 'DEEPGRAM_API_KEY'))
-        : new FakeSttAdapter(),
+    inject: [AppConfig, GeminiClient],
+    useFactory: ({ env }: AppConfig, gemini: GeminiClient): SttAdapter =>
+      createSttAdapter(env, gemini),
   },
   {
     provide: TTS_ADAPTER,
-    inject: [AppConfig],
-    useFactory: ({ env }: AppConfig): TtsAdapter =>
-      env.TTS_PROVIDER === 'elevenlabs'
-        ? new ElevenLabsTtsAdapter(required(env, 'ELEVENLABS_API_KEY'))
-        : new FakeTtsAdapter(),
+    inject: [AppConfig, GeminiClient],
+    useFactory: ({ env }: AppConfig, gemini: GeminiClient): TtsAdapter =>
+      createTtsAdapter(env, gemini),
   },
   {
     provide: MAIL_ADAPTER,

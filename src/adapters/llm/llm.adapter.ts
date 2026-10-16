@@ -8,7 +8,7 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export type LlmMessage = { role: 'user' | 'assistant'; content: string };
 
 export type LlmJsonRequest = {
-  /** Which prompt this is ('evaluator', 'summariser', 'interviewer', 'draft-cards', 'draft-questions'). The fake adapter keys canned outputs on it; real adapters use it only for logging. */
+  /** Which prompt this is ('evaluator', 'evaluator_detail', 'summariser', 'interviewer', 'draft-cards', 'draft-questions'). The fake adapter keys canned outputs on it; real adapters use it only for logging. */
   tag: string;
   model: string;
   temperature: number;
@@ -21,7 +21,12 @@ export type LlmJsonRequest = {
   thinkingLevel?: ThinkingLevel;
 };
 
-export type LlmUsage = { inputTokens: number; outputTokens: number; latencyMs: number; costUsd: number | null };
+export type LlmUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+  costUsd: number | null;
+};
 
 export type LlmJsonResult = {
   /** Parsed JSON, unvalidated. */
@@ -40,7 +45,10 @@ export interface LlmAdapter {
 
 /** Thrown for provider outages, timeouts and refusals. Callers map it to `ai_unavailable`. */
 export class LlmUnavailableError extends Error {
-  constructor(message: string, readonly cause?: unknown) {
+  constructor(
+    message: string,
+    readonly cause?: unknown,
+  ) {
     super(message);
     this.name = 'LlmUnavailableError';
   }

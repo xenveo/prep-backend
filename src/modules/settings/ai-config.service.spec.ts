@@ -76,6 +76,7 @@ describe('AiConfigService', () => {
     expect(config.roles.map((r) => r.role)).toEqual([
       'interviewer',
       'evaluator',
+      'evaluator_detail',
       'summariser',
       'drafter',
     ]);
@@ -148,6 +149,32 @@ describe('AiConfigService', () => {
     expect(tx.promptVersion.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ version: 1, template: 'new' }),
     });
+  });
+
+  it('PUT accepts the evaluator_detail role and falls back to its default template', async () => {
+    expect(
+      aiConfigUpdateSchema.safeParse({
+        role: 'evaluator_detail',
+        model: 'm',
+        temperature: 0.3,
+      }).success,
+    ).toBe(true);
+    const { service, tx, prompts } = setup([]);
+    await service.update(
+      { role: 'evaluator_detail', model: 'm', temperature: 0.3 },
+      'sa1',
+      null,
+    );
+    expect(tx.promptVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        role: 'evaluator_detail',
+        version: 1,
+        thinkingLevel: 'low',
+        template: DEFAULT_PROMPTS.find((p) => p.role === 'evaluator_detail')!
+          .template,
+      }),
+    });
+    expect(prompts.invalidate).toHaveBeenCalledWith('evaluator_detail');
   });
 
   it('PUT stores the requested thinking level and audits the change', async () => {

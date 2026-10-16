@@ -8,6 +8,7 @@ import {
 import { Logger } from '@nestjs/common';
 import {
   draftQuestionsOutputSchema,
+  evaluatorDetailOutputSchema,
   evaluatorOutputSchema,
   jsonSchemaOf,
   summariserOutputSchema,
@@ -298,6 +299,7 @@ describe('toGeminiJsonSchema', () => {
   ]);
   it.each([
     ['evaluator', evaluatorOutputSchema],
+    ['evaluator_detail', evaluatorDetailOutputSchema],
     ['summariser', summariserOutputSchema],
     ['drafter', draftQuestionsOutputSchema],
   ])('leaves only accepted keywords in the %s schema', (_, zodSchema) => {

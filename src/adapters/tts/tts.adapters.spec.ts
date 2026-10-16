@@ -15,10 +15,9 @@ describe('estimateSpeechSeconds', () => {
 
 describe('FakeTtsAdapter', () => {
   it('returns a small mp3 and a word-count duration', async () => {
-    const r = await new FakeTtsAdapter().speak(
-      'one two three four five',
-      'Calm, mid-pitch',
-    );
+    const tts = new FakeTtsAdapter();
+    const r = await tts.speak('one two three four five', 'Calm, mid-pitch');
+    expect(tts.mimeType).toBe('audio/mpeg');
     expect(r.mimeType).toBe('audio/mpeg');
     expect(r.audio[0]).toBe(0xff);
     expect(r.audio.length).toBeGreaterThan(0);
@@ -43,6 +42,8 @@ describe('ElevenLabsTtsAdapter', () => {
     );
     expect(fetchFn.mock.calls[0][1].headers['xi-api-key']).toBe('key');
     expect(r.audio).toEqual(Buffer.from([1, 2, 3]));
+    expect(r.mimeType).toBe(tts.mimeType);
+    expect(tts.mimeType).toBe('audio/mpeg');
     expect(r.durationS).toBeGreaterThan(0);
   });
 

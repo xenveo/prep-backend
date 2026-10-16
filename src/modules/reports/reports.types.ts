@@ -86,7 +86,8 @@ export type AdminDelivery = {
   wpm: number;
   paceLabel?: string;
   fillerWords: number;
-  longestPauseSec: number;
+  /** Null when pauses were not measured. */
+  longestPauseSec: number | null;
 };
 
 export type Try = {
