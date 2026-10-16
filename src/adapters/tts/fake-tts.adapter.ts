@@ -10,11 +10,12 @@ function silentMp3Frame(): Buffer {
 
 export class FakeTtsAdapter implements TtsAdapter {
   readonly provider = 'fake';
+  readonly mimeType = 'audio/mpeg';
 
   speak(text: string, _voice?: string): Promise<TtsResult> {
     return Promise.resolve({
       audio: silentMp3Frame(),
-      mimeType: 'audio/mpeg',
+      mimeType: this.mimeType,
       durationS: estimateSpeechSeconds(text),
       provider: this.provider,
       latencyMs: 0,

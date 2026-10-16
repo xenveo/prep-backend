@@ -55,14 +55,20 @@ export const envSchema = z.object({
   AUTH_DEV_ACCEPT_ANY_CODE: bool,
   AI_ADMIN_CALLS_PER_HOUR: z.coerce.number().int().default(30),
 
-  LLM_PROVIDER: z.enum(['anthropic', 'fake']).default('fake'),
+  LLM_PROVIDER: z.enum(['gemini', 'anthropic', 'fake']).default('fake'),
   ANTHROPIC_API_KEY: z.string().optional(),
   /** Regional endpoint (data residency, plan §1). */
   ANTHROPIC_BASE_URL: z.string().optional(),
-  STT_PROVIDER: z.enum(['deepgram', 'fake']).default('fake'),
+  STT_PROVIDER: z.enum(['gemini', 'deepgram', 'fake']).default('fake'),
   DEEPGRAM_API_KEY: z.string().optional(),
-  TTS_PROVIDER: z.enum(['elevenlabs', 'fake']).default('fake'),
+  TTS_PROVIDER: z.enum(['gemini', 'elevenlabs', 'fake']).default('fake'),
   ELEVENLABS_API_KEY: z.string().optional(),
+  /** Required when any provider is `gemini`. Use a paid-tier key: free-tier content may be used by Google. */
+  GEMINI_API_KEY: z.string().optional(),
+  /** LLM models live in prompt_versions (NFR-12); speech models are infrastructure. */
+  GEMINI_STT_MODEL: z.string().default('gemini-3.8-flash'),
+  GEMINI_TTS_MODEL: z.string().default('gemini-3.8-flash-tts'),
+  GEMINI_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
   MAIL_PROVIDER: z.enum(['resend', 'ses', 'console']).default('console'),
   MAIL_FROM: z.string().default('no-reply@preppilot.local'),
   RESEND_API_KEY: z.string().optional(),

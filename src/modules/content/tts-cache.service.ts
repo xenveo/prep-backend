@@ -18,9 +18,22 @@ export type TtsOptions = {
   attemptId?: string;
 };
 
-/** Storage key of the cached speech for (voice, text): `tts/<sha256(voice + "\n" + text)>.mp3`. */
-export const ttsKey = (voice: string, text: string) =>
-  `tts/${sha256Hex(`${voice}\n${text}`)}.mp3`;
+/** File extension of each TTS audio format. */
+const TTS_EXTENSIONS: Record<string, string> = {
+  'audio/wav': 'wav',
+  'audio/mpeg': 'mp3',
+};
+
+/**
+ * Storage key of the cached speech for (voice, text) in the adapter's format:
+ * `tts/<sha256(voice + "\n" + text)>.<wav|mp3>`. Entries in another format are misses, so
+ * switching to a provider with another format re-renders instead of serving the old audio.
+ */
+export function ttsKey(voice: string, text: string, mimeType: string): string {
+  const ext = TTS_EXTENSIONS[mimeType];
+  if (!ext) throw new Error(`No file extension for TTS audio ${mimeType}`);
+  return `tts/${sha256Hex(`${voice}\n${text}`)}.${ext}`;
+}
 
 /**
  * Text-to-speech cached by content hash (plan §6 "TTS", NFR-01, NFR-10). A cache hit makes no
@@ -40,7 +53,7 @@ export class TtsCacheService {
     opts: TtsOptions = {},
   ): Promise<{ key: string; durationS: number }> {
     const voice = opts.voice ?? (await this.settings.get()).voice;
-    const key = ttsKey(voice, text);
+    const key = ttsKey(voice, text, this.tts.mimeType);
     if (await this.storage.exists(key)) {
       return { key, durationS: estimateSpeechSeconds(text) };
     }

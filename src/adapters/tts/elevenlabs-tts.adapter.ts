@@ -19,6 +19,7 @@ const DEFAULT_VOICE = 'Calm, mid-pitch';
 
 export class ElevenLabsTtsAdapter implements TtsAdapter {
   readonly provider = 'elevenlabs';
+  readonly mimeType = 'audio/mpeg';
 
   constructor(
     private readonly apiKey: string,
@@ -52,7 +53,7 @@ export class ElevenLabsTtsAdapter implements TtsAdapter {
     const audio = Buffer.from(await res.arrayBuffer());
     return {
       audio,
-      mimeType: 'audio/mpeg',
+      mimeType: this.mimeType,
       durationS: estimateSpeechSeconds(text),
       provider: this.provider,
       latencyMs: Date.now() - started,

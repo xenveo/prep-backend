@@ -9,6 +9,7 @@ These are SRS features that aren't built yet, checked against the code on 2026-1
 | F3 | Sample answer outline editing | FR-ROLE-03 | **R1** | admin (backend field exists) |
 | B1 | Candidate "Log out" menu item logs a Base UI `nativeButton` error | bug | **R1** | candidate |
 | B2 | Candidate privacy page shows raw "Failed to fetch" | bug | **R1** | candidate |
+| B3 | Candidate `theme-provider.tsx:50` calls `event.key.toLowerCase()` when `key` is undefined (autofill keydown) | bug (found in P3) | **R1** | candidate |
 | PD1 | Stable audit action keys | D3 | **R1** | backend, admin (check) |
 | PD2 | Per-role progress in admin candidate detail | D3 | **R1** | backend, admin |
 | PD3 | "Clarity (written)" label for typed answers | D3 | **R1** | backend (mode field), admin, candidate |
@@ -91,9 +92,10 @@ Candidates get a 202 acknowledgement and nothing more. Add `GET /api/me/privacy-
 
 The template exists but isn't wired. Add a workspace setting (default off), and send it on `complete` through the email queue. Later.
 
-## B1, B2 · Candidate bugs
+## B1–B3 · Candidate bugs
 
 - **B1:** `components/prep/shell/avatar-menu.tsx`. The Base UI `Menu.Item` rendering a button needs `nativeButton` or a non-button child. Fix it per the installed Base UI docs.
+- **B3:** `theme-provider.tsx:50`. Guard the key handler for events without `key`; autofill fires keydown without one.
 - **B2:** `components/prep/privacy/privacy-screen.tsx:23`. Map `TypeError: Failed to fetch` and other non-`ApiError` failures to friendly copy, as the admin `settingsErrorMessage` helper does.
 
 ## Product changes (PD1–PD4)

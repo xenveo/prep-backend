@@ -1,9 +1,10 @@
+import { Logger } from '@nestjs/common';
 import type { AuditService } from '../../common/audit/audit.service.js';
 import { AppError } from '../../common/errors/app-error.js';
 import type { QueueService } from '../../common/queue/queue.types.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { EvaluatorService } from '../ai/evaluator.service.js';
-import type { EvaluatorOutput } from '../ai/schemas.js';
+import type { EvaluatorDetailOutput, EvaluatorOutput } from '../ai/schemas.js';
 import { DEFAULT_ROLE_SETTINGS, type Rubric } from '../interview/types.js';
 import type { AiQuotaService } from './ai-quota.service.js';
 import {
@@ -26,17 +27,17 @@ const rubric: Rubric = {
 const output = {
   worked: ['Real example.'],
   improve: ['End with the result.'],
-  highlights: [
-    {
-      quote: 'a',
-      kind: 'match',
-      note: 'Clear opening.',
-      rubric_point_id: 'kp1',
-    },
-    { quote: 'b', kind: 'match', note: 'Good tone.' },
-    { quote: 'c', kind: 'issue', note: 'No result.' },
-  ],
 } as unknown as EvaluatorOutput;
+const highlights: EvaluatorDetailOutput['highlights'] = [
+  {
+    quote: 'a',
+    kind: 'match',
+    note: 'Clear opening.',
+    rubric_point_id: 'kp1',
+  },
+  { quote: 'b', kind: 'match', note: 'Good tone.' },
+  { quote: 'c', kind: 'issue', note: 'No result.' },
+];
 
 function question(over: Record<string, unknown> = {}) {
   return {
@@ -92,6 +93,9 @@ function setup(opts: { found?: unknown; roleStatus?: string } = {}) {
         relevance: 100,
       },
     }),
+    evaluateDetail: vi.fn().mockResolvedValue({
+      output: { spoken_summary: 'S', highlights, evidence: [] },
+    }),
   };
   const quota = { consume: vi.fn().mockResolvedValue(undefined) };
   const queue = { add: vi.fn().mockResolvedValue({ jobId: 'j' }) };
@@ -139,6 +143,7 @@ describe('toTestEvaluation', () => {
       72,
       { content: 75, structure: 50, delivery: 75, relevance: 100 },
       output,
+      highlights,
       rubric,
     );
     expect(e).toMatchObject({
@@ -154,7 +159,7 @@ describe('toTestEvaluation', () => {
 
   it('uses the admin band spelling at the edges', () => {
     const band = (s: number) =>
-      toTestEvaluation('a', s, {} as never, output, rubric).band;
+      toTestEvaluation('a', s, {} as never, output, highlights, rubric).band;
     expect([
       band(49),
       band(50),
@@ -189,6 +194,41 @@ describe('QuestionsService.test', () => {
     expect(prisma.question.update).toHaveBeenCalledWith({
       where: { id: 'q1' },
       data: { sampleEvaluation: result },
+    });
+  });
+
+  it('runs call 1 then call 2 and keeps the admin TestEvaluation shape', async () => {
+    const { service, evaluator } = setup();
+    const result = await service.test('q1', 'My answer', actor);
+    const [input] = evaluator.evaluate.mock.calls[0];
+    expect(evaluator.evaluateDetail).toHaveBeenCalledWith(input, output);
+    expect(evaluator.evaluate.mock.invocationCallOrder[0]).toBeLessThan(
+      evaluator.evaluateDetail.mock.invocationCallOrder[0],
+    );
+    expect(result).toEqual({
+      answer: 'My answer',
+      score: 72,
+      band: 'nearly',
+      subScores: { content: 75, structure: 50, delivery: 75, relevance: 100 },
+      matched: ['Names the problem', 'Good tone.', 'Real example.'],
+      issues: ['No result.', 'End with the result.'],
+      candidateFeedback: 'Real example. End with the result.',
+      isTest: true,
+    });
+  });
+
+  it('still answers, without highlights, when call 2 fails', async () => {
+    Logger.overrideLogger(false);
+    const { service, evaluator } = setup();
+    evaluator.evaluateDetail.mockRejectedValue(
+      new AppError('ai_unavailable', 503, 'down'),
+    );
+    const result = await service.test('q1', 'My answer', actor);
+    Logger.overrideLogger(['log', 'error', 'warn', 'debug', 'verbose']);
+    expect(result).toMatchObject({
+      score: 72,
+      matched: ['Real example.'],
+      issues: ['End with the result.'],
     });
   });
 

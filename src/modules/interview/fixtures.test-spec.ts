@@ -56,6 +56,7 @@ export function attempt(
     fillerCount: null,
     pauseCount: null,
     longestPauseS: null,
+    speakingS: null,
     dimensionScores: dims(score),
     score,
     learningScore: null,

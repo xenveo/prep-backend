@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../../common/audit/audit.service.js';
 import { notFound, validationFailed } from '../../common/errors/app-error.js';
 import { toAdminBand } from '../../common/mapping/enums.js';
@@ -9,8 +9,11 @@ import {
 import type { Prisma, Question } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AiQuotaService } from './ai-quota.service.js';
-import { EvaluatorService } from '../ai/evaluator.service.js';
-import type { EvaluatorOutput } from '../ai/schemas.js';
+import {
+  EvaluatorService,
+  type EvaluateInput,
+} from '../ai/evaluator.service.js';
+import type { EvaluatorDetailOutput, EvaluatorOutput } from '../ai/schemas.js';
 import { bandFor } from '../interview/scoring/score.js';
 import type { RoleSettings, Rubric } from '../interview/types.js';
 import type { QuestionInput } from './content.schemas.js';
@@ -40,23 +43,24 @@ export function toStoredRubric(input: QuestionInput['rubric']): Rubric {
 
 const unique = (items: string[]) => [...new Set(items.filter(Boolean))];
 
-/** Evaluator output → the admin UI's TestEvaluation. */
+/** Evaluator call 1 output and call 2 highlights → the admin UI's TestEvaluation. */
 export function toTestEvaluation(
   answer: string,
   score: number,
   subScores: TestEvaluation['subScores'],
   output: EvaluatorOutput,
+  highlights: EvaluatorDetailOutput['highlights'],
   rubric: Rubric,
 ): TestEvaluation {
   const pointText = new Map(rubric.keyPoints.map((k) => [k.id, k.point]));
-  const matched = output.highlights
+  const matched = highlights
     .filter((h) => h.kind === 'match')
     .map((h) =>
       h.rubric_point_id && pointText.has(h.rubric_point_id)
         ? pointText.get(h.rubric_point_id)!
         : h.note,
     );
-  const issues = output.highlights
+  const issues = highlights
     .filter((h) => h.kind === 'issue')
     .map((h) => h.note);
   return {
@@ -74,6 +78,8 @@ export function toTestEvaluation(
 /** Question bank for admins (FR-ROLE-04/05, spec "Roles and content"). */
 @Injectable()
 export class QuestionsService {
+  private readonly logger = new Logger(QuestionsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly roles: RolesService,
@@ -209,7 +215,10 @@ export class QuestionsService {
     });
   }
 
-  /** Runs the real evaluator on a sample answer (never an Attempt); caches it as `sampleEvaluation`. */
+  /**
+   * Runs the real evaluator on a sample answer (never an Attempt); caches it as `sampleEvaluation`.
+   * Both evaluator calls run in sequence; if the detail call fails, the result has no highlights.
+   */
   async test(
     questionId: string,
     answer: string,
@@ -221,7 +230,7 @@ export class QuestionsService {
     const role = await this.roles.getEditableRow(question.jobRoleId);
     await this.quota.consume(actor.id);
     const rubric = question.rubric as Rubric;
-    const result = await this.evaluator.evaluate({
+    const input: EvaluateInput = {
       roleTitle: role.title,
       question: question.text,
       rubric,
@@ -229,12 +238,22 @@ export class QuestionsService {
       mode: 'typed',
       attemptNo: 1,
       dimensionWeights: (role.settings as RoleSettings).dimensionWeights,
-    });
+    };
+    const result = await this.evaluator.evaluate(input);
+    const detail = await this.evaluator
+      .evaluateDetail(input, result.output)
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `question ${questionId} test detail evaluation failed (${err instanceof Error ? err.name : typeof err})`,
+        );
+        return null;
+      });
     const evaluation = toTestEvaluation(
       answer,
       result.score,
       result.dimensionScores,
       result.output,
+      detail?.output.highlights ?? [],
       rubric,
     );
     await this.prisma.question.update({

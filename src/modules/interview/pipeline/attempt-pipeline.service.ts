@@ -26,7 +26,10 @@ import {
   buildStoredEvidence,
   buildStoredFeedback,
   EvaluatorService,
+  withDetail,
+  type EvaluateInput,
 } from '../../ai/evaluator.service.js';
+import type { EvaluatorOutput } from '../../ai/schemas.js';
 import { TtsCacheService } from '../../content/tts-cache.service.js';
 import { SettingsService } from '../../settings/settings.service.js';
 import { toDeliveryMetrics } from '../scoring/delivery.js';
@@ -73,8 +76,9 @@ class PipelineFailure extends Error {
 const elapsed = (start: number) => Math.round(performance.now() - start);
 
 /**
- * The attempt job (spec "AI interview pipeline", plan §6): STT → metrics → evaluate → persist and
- * push `attempt.evaluated` → TTS and push `feedback.audio_ready`. Idempotent per attempt.
+ * The attempt job (spec "AI interview pipeline", plan §6, 01-gemini decisions 1a and 2a): STT →
+ * metrics → evaluate (call 1) → persist and push `attempt.evaluated` → detail evaluation (call 2:
+ * spoken summary, highlights, evidence) → TTS and push `feedback.audio_ready`. Idempotent per attempt.
  */
 @Injectable()
 export class AttemptPipelineService implements OnModuleInit {
@@ -194,7 +198,7 @@ export class AttemptPipelineService implements OnModuleInit {
       const stt = await this.transcribe(attempt);
       transcript = stt.text;
       const t = performance.now();
-      metrics = computeMetrics(stt.words, stt.durationS);
+      metrics = voiceMetrics(attempt, stt);
       await this.prisma.attempt.update({
         where: { id: attemptId },
         data: {
@@ -222,13 +226,12 @@ export class AttemptPipelineService implements OnModuleInit {
       (await this.settings.get()).deliveryTargets,
     );
 
-    // 3. Evaluate.
+    // 3. Evaluate: call 1, scores and written feedback.
     const attemptNo = attempt.attemptNo === 2 ? 2 : 1;
     const previousImprovementPoints =
       attemptNo === 2 ? await this.previousPoints(sessionId, questionId) : [];
     const weights = session.weightsSnapshot as unknown as WeightsSnapshot;
-    let t = performance.now();
-    const result = await this.evaluator.evaluate({
+    const input: EvaluateInput = {
       roleTitle: session.role.title,
       question: sq.question.text,
       rubric: sq.question.rubric as unknown as Rubric,
@@ -240,10 +243,12 @@ export class AttemptPipelineService implements OnModuleInit {
       dimensionWeights: weights.dimensionWeights,
       sessionId,
       attemptId,
-    });
+    };
+    let t = performance.now();
+    const result = await this.evaluator.evaluate(input);
     this.logger.log(`attempt ${attemptId} step=evaluate ms=${elapsed(t)}`);
 
-    // 4. Persist and push.
+    // 4. Persist and push the written feedback.
     t = performance.now();
     const feedback = buildStoredFeedback(result.output, delivery);
     const followUp = attemptNo === 1 ? result.output.follow_up : null;
@@ -257,10 +262,6 @@ export class AttemptPipelineService implements OnModuleInit {
           score: result.score,
           learningScore: result.learningScore,
           feedback: feedback as unknown as Prisma.InputJsonObject,
-          evidence: buildStoredEvidence(
-            result.output,
-          ) as unknown as Prisma.InputJsonArray,
-          feedbackText: feedback.spokenSummary,
         },
       }),
     ];
@@ -290,13 +291,46 @@ export class AttemptPipelineService implements OnModuleInit {
     });
     this.logger.log(`attempt ${attemptId} step=persist ms=${elapsed(t)}`);
 
-    // 5. TTS, after the push (not in the 8 s budget). Text feedback is already delivered.
-    await this.speak(done, feedback);
+    // 5–6. After the push (not in the 8 s budget): call 2, then TTS of its spoken summary.
+    const detailed = await this.detail(done, input, result.output, feedback);
+    if (detailed) await this.speak(done, detailed);
   }
 
-  private async transcribe(
+  /**
+   * Call 2: merges the spoken summary, highlights and evidence into the done attempt. A failure keeps
+   * the attempt done with its written feedback (no highlights, no spoken feedback) and returns null.
+   */
+  private async detail(
     attempt: Attempt,
-  ): Promise<{ text: string; words: Word[]; durationS: number }> {
+    input: EvaluateInput,
+    first: EvaluatorOutput,
+    feedback: StoredFeedback,
+  ): Promise<StoredFeedback | null> {
+    const t = performance.now();
+    try {
+      const result = await this.evaluator.evaluateDetail(input, first);
+      const merged = withDetail(feedback, result.output);
+      await this.prisma.attempt.update({
+        where: { id: attempt.id },
+        data: {
+          feedback: merged as unknown as Prisma.InputJsonObject,
+          evidence: buildStoredEvidence(
+            result.output,
+          ) as unknown as Prisma.InputJsonArray,
+          feedbackText: merged.spokenSummary,
+        },
+      });
+      this.logger.log(`attempt ${attempt.id} step=detail ms=${elapsed(t)}`);
+      return merged;
+    } catch (err) {
+      this.logger.warn(
+        `attempt ${attempt.id} step=detail failed after ${elapsed(t)} ms (${errName(err)}); written feedback stands`,
+      );
+      return null;
+    }
+  }
+
+  private async transcribe(attempt: Attempt): Promise<Transcription> {
     const { id: attemptId, sessionId, audioKey } = attempt;
     if (!audioKey) throw new PipelineFailure('audio_missing');
     const t = performance.now();
@@ -409,6 +443,36 @@ export class AttemptPipelineService implements OnModuleInit {
       );
     }
   }
+}
+
+type Transcription = { text: string; words: Word[]; durationS: number };
+
+/**
+ * Metric precedence (01-gemini decision 1a): duration from the upload (the STT value only when the
+ * client sent none), speaking time and pauses from the upload, pauses from STT word timestamps when
+ * the upload has none, else not measured.
+ */
+export function voiceMetrics(
+  attempt: Pick<
+    Attempt,
+    'durationS' | 'speakingS' | 'pauseCount' | 'longestPauseS'
+  >,
+  stt: Transcription,
+): VoiceMetrics {
+  const uploaded = attempt.durationS ?? 0;
+  return computeMetrics({
+    text: stt.text,
+    words: stt.words,
+    durationS: uploaded > 0 ? uploaded : stt.durationS,
+    speakingS: attempt.speakingS,
+    pauses:
+      attempt.pauseCount !== null && attempt.longestPauseS !== null
+        ? {
+            pauseCount: attempt.pauseCount,
+            longestPauseS: attempt.longestPauseS,
+          }
+        : null,
+  });
 }
 
 function errName(err: unknown): string {

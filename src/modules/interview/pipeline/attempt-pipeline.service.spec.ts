@@ -47,6 +47,7 @@ function attemptRow(over: Partial<Attempt> = {}): Attempt {
     fillerCount: null,
     pauseCount: null,
     longestPauseS: null,
+    speakingS: null,
     dimensionScores: null,
     score: null,
     learningScore: null,
@@ -305,6 +306,153 @@ describe('AttemptPipelineService', () => {
     });
     // Attempt 1 does not move the interview on.
     expect(t.session.currentQuestion).toBe(2);
+  });
+
+  it('publishes attempt.evaluated before call 2 starts, then merges call 2 and speaks it', async () => {
+    const t = setup();
+    t.addVoice();
+    const atCall2: { events: string[]; row: Attempt }[] = [];
+    const json = t.llm.json.bind(t.llm);
+    vi.spyOn(t.llm, 'json').mockImplementation((req) => {
+      if (req.tag === 'evaluator_detail')
+        atCall2.push({
+          events: t.events.map((e) => e.type),
+          row: t.attempts.get('att-1')!,
+        });
+      return json(req);
+    });
+    await t.service.processAttempt('att-1');
+
+    expect(t.llm.calls.map((c) => c.tag)).toEqual([
+      'evaluator',
+      'evaluator_detail',
+    ]);
+    expect(atCall2).toHaveLength(1);
+    expect(atCall2[0].events).toEqual([
+      'attempt.transcribed',
+      'attempt.evaluated',
+    ]);
+    // Written feedback is done and published without the call-2 fields.
+    const before = atCall2[0].row;
+    expect(before.status).toBe('done');
+    expect(before.evidence).toBeNull();
+    expect(before.feedbackText).toBeNull();
+    expect(before.feedback).toMatchObject({
+      spokenSummary: '',
+      highlights: [],
+    });
+    expect(t.events[1].attempt.feedback.audioSeconds).toBe(0);
+
+    const row = t.attempts.get('att-1')!;
+    const feedback = row.feedback as StoredFeedback;
+    expect(feedback.spokenSummary).toBe(
+      'Nice work. You used a real example. Next time, end with the result.',
+    );
+    expect(feedback.highlights).toEqual([
+      expect.objectContaining({ kind: 'match', rubricPointId: 'kp1' }),
+    ]);
+    expect(feedback.worked).toEqual((before.feedback as StoredFeedback).worked);
+    expect(row.evidence).toEqual([
+      expect.objectContaining({ dimension: 'content' }),
+    ]);
+    expect(t.tts.getOrCreate).toHaveBeenCalledWith(
+      feedback.spokenSummary,
+      expect.any(Object),
+    );
+    expect(t.events.map((e) => e.type)).toEqual([
+      'attempt.transcribed',
+      'attempt.evaluated',
+      'feedback.audio_ready',
+    ]);
+  });
+
+  it('call 2 failure keeps the attempt done with written feedback and no audio', async () => {
+    const t = setup();
+    t.addVoice();
+    t.llm.setNext('evaluator_detail', new LlmUnavailableError('down'));
+    await t.service.processAttempt('att-1');
+
+    const row = t.attempts.get('att-1')!;
+    expect(row.status).toBe('done');
+    expect(row.error).toBeNull();
+    expect(row.score).toEqual(expect.any(Number));
+    expect(row.feedback).toMatchObject({
+      spokenSummary: '',
+      highlights: [],
+      worked: expect.any(Array),
+    });
+    expect(row.evidence).toBeNull();
+    expect(row.feedbackText).toBeNull();
+    expect(row.feedbackAudioKey).toBeNull();
+    expect(t.tts.getOrCreate).not.toHaveBeenCalled();
+    expect(t.events.map((e) => e.type)).toEqual([
+      'attempt.transcribed',
+      'attempt.evaluated',
+    ]);
+  });
+
+  it('voice metrics: upload duration, speaking time and pauses win over STT', async () => {
+    const t = setup();
+    t.addVoice({
+      durationS: 60,
+      speakingS: 20,
+      pauseCount: 4,
+      longestPauseS: 2.5,
+    });
+    await t.service.processAttempt('att-1');
+
+    // 70 words over 20 s of speech; the fake STT's 29.5 s duration and 1 pause are ignored.
+    expect(t.attempts.get('att-1')!).toMatchObject({
+      durationS: 60,
+      wpm: 210,
+      pauseCount: 4,
+      longestPauseS: 2.5,
+      fillerCount: 0,
+    });
+    const sent = t.llm.calls[0].messages[0].content;
+    expect(sent).toContain('4 pauses over one second, longest pause 2.5 s');
+  });
+
+  it('voice metrics: falls back to the answer duration and STT word timestamps', async () => {
+    const t = setup();
+    t.addVoice({ durationS: 35 });
+    await t.service.processAttempt('att-1');
+    // 70 words over 35 s; one 1.5 s gap in the fake STT timings.
+    expect(t.attempts.get('att-1')!).toMatchObject({
+      durationS: 35,
+      wpm: 120,
+      pauseCount: 1,
+      longestPauseS: 1.5,
+    });
+  });
+
+  it('voice metrics: no pause source means pauses are not measured, and the pauses metric is omitted', async () => {
+    const t = setup();
+    t.addVoice({ durationS: 30 });
+    vi.spyOn(t.stt, 'transcribe').mockResolvedValue({
+      text: 'Um, I listened and, like, fixed it.',
+      words: [],
+      durationS: 0,
+      provider: 'fake',
+      model: null,
+      latencyMs: 0,
+      costUsd: null,
+    });
+    await t.service.processAttempt('att-1');
+
+    const row = t.attempts.get('att-1')!;
+    expect(row).toMatchObject({
+      status: 'done',
+      durationS: 30,
+      wpm: 14,
+      fillerCount: 2,
+      pauseCount: null,
+      longestPauseS: null,
+    });
+    expect((row.feedback as StoredFeedback).delivery.map((d) => d.key)).toEqual(
+      ['pace', 'fillers'],
+    );
+    expect(t.llm.calls[0].messages[0].content).toContain('pauses not measured');
   });
 
   it('typed: skips STT and metrics, delivery is []', async () => {

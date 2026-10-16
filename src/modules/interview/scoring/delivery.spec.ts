@@ -56,6 +56,13 @@ describe('toDeliveryMetrics', () => {
     expect(pauses.valueText).toBe('6 pauses · well placed');
   });
 
+  it('omits pauses (rather than showing 0) when they were not measured', () => {
+    const out = toDeliveryMetrics(
+      metrics({ pauseCount: null, longestPauseS: null }),
+    );
+    expect(out.map((m) => m.key)).toEqual(['pace', 'fillers']);
+  });
+
   it('uses configured targets', () => {
     const [pace] = toDeliveryMetrics(metrics({ wpm: 110 }), {
       ...DEFAULT_DELIVERY_TARGETS,
@@ -68,11 +75,17 @@ describe('toDeliveryMetrics', () => {
 
 describe('toAdminDelivery', () => {
   it('maps to the admin UI shape', () => {
-    expect(toAdminDelivery(metrics({ wpm: 100 }))).toEqual({
+    expect(
+      toAdminDelivery({ wpm: 100, fillerCount: 2, longestPauseS: 1.8 }),
+    ).toEqual({
       wpm: 100,
       paceLabel: 'slow',
       fillerWords: 2,
       longestPauseSec: 1.8,
     });
+    expect(
+      toAdminDelivery({ wpm: 140, fillerCount: 0, longestPauseS: null })
+        .longestPauseSec,
+    ).toBeNull();
   });
 });

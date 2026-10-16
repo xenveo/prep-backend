@@ -21,7 +21,6 @@ const attempt = (over: Partial<ReviewAttempt> = {}): ReviewAttempt => ({
   },
   wpm: 172,
   fillerCount: 3,
-  pauseCount: 4,
   longestPauseS: 2.1,
   ...over,
 });
@@ -64,7 +63,6 @@ describe('toTry', () => {
         score: 70,
         wpm: null,
         fillerCount: null,
-        pauseCount: null,
         longestPauseS: null,
         feedback: {
           worked: [],
@@ -88,6 +86,15 @@ describe('toTry', () => {
       { text: 'State the result', state: 'done', detail: 'Said 20%' },
       { text: 'Shorter intro', state: 'missed' },
     ]);
+  });
+
+  it('keeps pace and fillers with a null longest pause when pauses were not measured', () => {
+    expect(toTry(attempt({ longestPauseS: null }), null).delivery).toEqual({
+      wpm: 172,
+      paceLabel: 'fast',
+      fillerWords: 3,
+      longestPauseSec: null,
+    });
   });
 });
 
