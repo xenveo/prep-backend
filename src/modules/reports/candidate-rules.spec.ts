@@ -2,7 +2,7 @@ import {
   CANDIDATE_CSV_HEADER,
   candidateCsvRows,
   matchesQuery,
-  scoreChange,
+  progressByRole,
   sortRows,
 } from './candidate-rules.js';
 import { toCsv } from './csv.js';
@@ -25,12 +25,34 @@ const row = (over: Partial<CandidateRow>): CandidateRow => ({
   ...over,
 });
 
-describe('scoreChange', () => {
-  it('is latest − baseline with 2+ sessions, else null', () => {
-    expect(scoreChange(71, 52, 2)).toBe(19);
-    expect(scoreChange(40, 52, 3)).toBe(-12);
-    expect(scoreChange(71, 71, 1)).toBeNull();
-    expect(scoreChange(null, 52, 2)).toBeNull();
+describe('progressByRole', () => {
+  const point = (roleId: string, date: string, score: number) => ({
+    roleId,
+    roleTitle: roleId === 'a' ? 'Analyst' : 'Support',
+    date,
+    score,
+  });
+
+  it('numbers each role on its own and keeps the oldest-first order', () => {
+    expect(
+      progressByRole([
+        point('a', '2026-10-01T00:00:00.000Z', 39),
+        point('s', '2026-10-02T00:00:00.000Z', 61),
+        point('a', '2026-10-03T00:00:00.000Z', 52),
+        point('s', '2026-10-04T00:00:00.000Z', 70),
+        point('s', '2026-10-05T00:00:00.000Z', 74),
+      ]),
+    ).toEqual([
+      { ...point('a', '2026-10-01T00:00:00.000Z', 39), label: 'Session 1' },
+      { ...point('s', '2026-10-02T00:00:00.000Z', 61), label: 'Session 1' },
+      { ...point('a', '2026-10-03T00:00:00.000Z', 52), label: 'Session 2' },
+      { ...point('s', '2026-10-04T00:00:00.000Z', 70), label: 'Session 2' },
+      { ...point('s', '2026-10-05T00:00:00.000Z', 74), label: 'Session 3' },
+    ]);
+  });
+
+  it('is empty without completed sessions', () => {
+    expect(progressByRole([])).toEqual([]);
   });
 });
 

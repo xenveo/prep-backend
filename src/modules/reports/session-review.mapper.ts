@@ -14,6 +14,7 @@ import type { ReviewQuestion, Try } from './reports.types.js';
 export type ReviewAttempt = Pick<
   Attempt,
   | 'attemptNo'
+  | 'mode'
   | 'score'
   | 'durationS'
   | 'dimensionScores'
@@ -47,6 +48,7 @@ export function toTry(a: ReviewAttempt, audioUrl: string | null): Try {
   const voice = a.wpm !== null && a.fillerCount !== null;
   const out: Try = {
     attempt: a.attemptNo === 2 ? 2 : 1,
+    mode: a.mode,
     score,
     band: toAdminBand(bandFor(score)),
     audioSeconds: seconds,

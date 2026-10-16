@@ -16,6 +16,8 @@ export interface TtsAdapter {
   readonly provider: string;
   /** The audio format every `speak` returns, known up front so a cache lookup can name the file. */
   readonly mimeType: string;
+  /** Provider model id, logged with every call (null when there is none). */
+  readonly model: string | null;
   /** `voice` is the WorkspaceSettings.voice label ("Calm, mid-pitch"); the adapter maps it to a provider voice. */
   speak(text: string, voice: string): Promise<TtsResult>;
 }

@@ -488,7 +488,6 @@ describe('Reports and admin read models (e2e)', () => {
         invitedBy: adminId,
         invitedByName: 'Arjun Admin',
         accessUntil: null,
-        changeSinceFirst: 27,
         assignments: [
           {
             roleId,
@@ -512,9 +511,21 @@ describe('Reports and admin read models (e2e)', () => {
         band: 'nearly',
         durationMin: 24,
       });
+      expect(res.body).not.toHaveProperty('changeSinceFirst');
+      const roleTitle = `${RUN} Support Associate`;
       expect(res.body.progress).toEqual([
-        expect.objectContaining({ label: 'Session 1', score: 45 }),
-        expect.objectContaining({ label: 'Session 2', score: 72 }),
+        expect.objectContaining({
+          roleId,
+          roleTitle,
+          label: 'Session 1',
+          score: 45,
+        }),
+        expect.objectContaining({
+          roleId,
+          roleTitle,
+          label: 'Session 2',
+          score: 72,
+        }),
       ]);
       expect(Array.isArray(res.body.activity)).toBe(true);
     });
@@ -563,6 +574,7 @@ describe('Reports and admin read models (e2e)', () => {
       const [first, second] = q2.tries;
       expect(first).toMatchObject({
         attempt: 1,
+        mode: 'voice',
         band: 'developing',
         audioSeconds: 98,
         audioLabel: '1:38',

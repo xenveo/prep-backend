@@ -152,10 +152,10 @@ describe('InvitesService', () => {
       data: { sent: 1, skipped: 5 },
     });
     expect(audit.record.mock.calls[0][0]).toMatchObject({
-      action: 'Sent 1 invite',
+      action: 'Sent invites',
       entity: 'invite_batch',
       entityId: 'batch-1',
-      itemLabel: 'march.csv',
+      itemLabel: '1 invite · march.csv',
     });
     expect(activity.record).toHaveBeenCalledWith(
       'u1',
@@ -295,7 +295,7 @@ describe('InvitesService', () => {
       data: { sent: 1, skipped: 1 },
     });
     expect(audit.record.mock.calls[0][0]).toMatchObject({
-      action: 'Sent 1 invite',
+      action: 'Sent invites',
       after: { candidateIds: ['u-rev'] },
     });
     expect(activity.record).toHaveBeenCalledWith(
@@ -351,8 +351,8 @@ describe('InvitesService', () => {
     );
     expect(res).toMatchObject({ sent: 0, skipped: 1 });
     expect(audit.record.mock.calls[0][0]).toMatchObject({
-      action: 'Sent 0 invites',
-      itemLabel: 'a@example.com',
+      action: 'Sent invites',
+      itemLabel: '0 invites · a@example.com',
     });
   });
 
@@ -385,7 +385,7 @@ describe('InvitesService', () => {
       roleTitles: ['Store Manager'],
     });
     expect(audit.record.mock.calls[0][0]).toMatchObject({
-      action: 'Resent an invite',
+      action: 'Resent invites',
       itemLabel: '1 candidate',
     });
   });

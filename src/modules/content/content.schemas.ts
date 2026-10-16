@@ -9,6 +9,7 @@ import {
 
 /** Admin UI TIP_MAX_LENGTH. */
 export const TIP_MAX_LENGTH = 90;
+export const OUTLINE_MAX_LENGTH = 1000;
 
 const seniority = z.enum(['entry', 'junior', 'mid', 'senior']);
 const title = z.string().trim().min(1, 'Role title is required').max(120);
@@ -63,6 +64,17 @@ export const flashCardInputSchema = z.object({
   category: cardCategorySchema,
   question: z.string().trim().min(1, 'Question is required').max(500),
   strongAnswerPoints: z.array(line).max(10),
+  /** Trimmed; empty becomes null. Omitted leaves the stored outline unchanged on update. */
+  sampleAnswerOutline: z
+    .string()
+    .trim()
+    .max(
+      OUTLINE_MAX_LENGTH,
+      `Sample answer outline must be ${OUTLINE_MAX_LENGTH} characters or fewer`,
+    )
+    .nullable()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v || null)),
   tip: z
     .string()
     .trim()

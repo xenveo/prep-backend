@@ -206,6 +206,7 @@ export type CandidateSession = {
   id: string;
   roleId: string;
   number: number;
+  mode: 'voice' | 'typed';
   startedAt: string;
   completedAt: string;
   score: number;

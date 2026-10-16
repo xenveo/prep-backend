@@ -12,6 +12,7 @@ function card(position: number, viewed = false) {
     category: 'role_knowledge',
     question: `Q${position}`,
     strongAnswerPoints: ['s'],
+    sampleAnswerOutline: position === 1 ? 'Outline' : null,
     commonMistakes: ['m'],
     tip: 't',
     views: viewed ? [{ userId: 'u1' }] : [],
@@ -63,9 +64,11 @@ describe('CandidateCardsService', () => {
       category: 'Role knowledge',
       question: 'Q1',
       strong: ['s'],
+      outline: 'Outline',
       tip: 't',
       mistakes: ['m'],
     });
+    expect(r.cards[1].outline).toBeNull();
   });
 
   it('logs "Studied N of N" when the last card is viewed', async () => {

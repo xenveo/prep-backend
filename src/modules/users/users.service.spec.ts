@@ -131,9 +131,33 @@ describe('UsersService', () => {
     expect(events.publish).toHaveBeenCalledTimes(2);
     expect(audit.record).toHaveBeenCalledTimes(1);
     expect(audit.record.mock.calls[0][0]).toMatchObject({
-      action: 'Deactivated 2 candidates',
+      action: 'Deactivated candidates',
       itemLabel: '2 candidates',
     });
+  });
+
+  it('deactivate and reactivate use the same action key for one candidate', async () => {
+    const { service, prisma, audit } = setup();
+    prisma.user.findMany.mockResolvedValueOnce([
+      { id: 'u1', status: 'active' },
+    ]);
+    await service.deactivate(admin, ['u1'], null);
+    prisma.user.findMany.mockResolvedValueOnce([
+      { id: 'u1', firstLoginAt: new Date() },
+    ]);
+    await service.reactivate(admin, ['u1'], null);
+    expect(audit.record.mock.calls.map((c) => c[0])).toMatchObject([
+      {
+        action: 'Deactivated candidates',
+        entityId: 'u1',
+        itemLabel: '1 candidate',
+      },
+      {
+        action: 'Reactivated candidates',
+        entityId: 'u1',
+        itemLabel: '1 candidate',
+      },
+    ]);
   });
 
   it('deactivate writes no audit when nothing changed', async () => {
@@ -159,9 +183,10 @@ describe('UsersService', () => {
       'active',
       'invite_pending',
     ]);
-    expect(audit.record.mock.calls[0][0].action).toBe(
-      'Reactivated 2 candidates',
-    );
+    expect(audit.record.mock.calls[0][0]).toMatchObject({
+      action: 'Reactivated candidates',
+      itemLabel: '2 candidates',
+    });
   });
 
   describe('assignRoles', () => {

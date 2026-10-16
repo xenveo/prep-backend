@@ -51,7 +51,7 @@ export class GeminiTtsAdapter implements TtsAdapter {
 
   constructor(
     private readonly gemini: GeminiClient,
-    private readonly model: string,
+    readonly model: string,
   ) {}
 
   async speak(text: string, voice: string): Promise<TtsResult> {
