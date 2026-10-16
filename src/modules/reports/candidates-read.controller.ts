@@ -1,10 +1,21 @@
-import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { Roles } from '../../common/auth/roles.decorator.js';
 import { ZodPipe } from '../../common/validation/zod.pipe.js';
 import { CandidatesReadService } from './candidates-read.service.js';
 import { attachment } from './csv.js';
 import {
+  candidateExportBodySchema,
+  type CandidateExportBody,
   candidateExportSchema,
   candidateQuerySchema,
   type CandidateQuery,
@@ -37,14 +48,21 @@ export class CandidatesReadController {
 
   /** Registered before `:id` so "export.csv" is not read as an id. */
   @Get('export.csv')
-  async exportCsv(
+  exportCsv(
     @Query(new ZodPipe(candidateExportSchema)) query: { ids?: string[] },
     @Res({ passthrough: true }) res: Response,
   ): Promise<string> {
-    const csv = await this.candidates.exportCsv(query.ids ?? []);
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', attachment('candidates.csv'));
-    return csv;
+    return this.sendCsv(query.ids ?? [], res);
+  }
+
+  /** Same export for selections too large for a query string. */
+  @Post('export.csv')
+  @HttpCode(200)
+  exportCsvPost(
+    @Body(new ZodPipe(candidateExportBodySchema)) body: CandidateExportBody,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    return this.sendCsv(body.ids, res);
   }
 
   @Get(':id')
@@ -58,5 +76,12 @@ export class CandidatesReadController {
     @Param('sid', uuid) sid: string,
   ): Promise<SessionReview> {
     return this.reviews.review(cid, sid);
+  }
+
+  private async sendCsv(ids: string[], res: Response): Promise<string> {
+    const csv = await this.candidates.exportCsv(ids);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', attachment('candidates.csv'));
+    return csv;
   }
 }

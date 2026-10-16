@@ -5,6 +5,7 @@ import {
   toReviewQuestion,
   toTry,
 } from './session-review.mapper.js';
+import type { Try } from './reports.types.js';
 
 const attempt = (over: Partial<ReviewAttempt> = {}): ReviewAttempt => ({
   attemptNo: 1,
@@ -91,16 +92,48 @@ describe('toTry', () => {
 });
 
 describe('toReviewQuestion', () => {
-  it('has one try and A2 = A1 when the retry was skipped', () => {
-    const first = toTry(attempt(), null);
-    const q = toReviewQuestion({
+  const question = (retrySkipped: boolean, second: Try | null) =>
+    toReviewQuestion({
       position: 2,
       text: 'Q',
       category: 'behavioural',
-      first,
-      second: null,
+      retrySkipped,
+      first: toTry(attempt(), null),
+      second,
     });
-    expect(q).toMatchObject({ n: 2, firstScore: 69, secondScore: 69 });
+
+  it('a skipped retry has one try and a null second score, not A2 = A1', () => {
+    const q = question(true, null);
+    expect(q).toMatchObject({
+      n: 2,
+      firstScore: 69,
+      secondScore: null,
+      retrySkipped: true,
+    });
+    expect(q.tries).toHaveLength(1);
+  });
+
+  it('a retry that was never answered also has a null second score', () => {
+    const q = question(false, null);
+    expect(q).toMatchObject({ secondScore: null, retrySkipped: false });
+    expect(q.tries).toHaveLength(1);
+  });
+
+  it('an answered retry reports both scores and both tries', () => {
+    const second = toTry(attempt({ attemptNo: 2, score: 80 }), null);
+    const q = question(false, second);
+    expect(q).toMatchObject({
+      firstScore: 69,
+      secondScore: 80,
+      retrySkipped: false,
+    });
+    expect(q.tries).toEqual([q.tries[0], second]);
+  });
+
+  it('ignores a stray attempt 2 on a skipped retry', () => {
+    const second = toTry(attempt({ attemptNo: 2, score: 80 }), null);
+    const q = question(true, second);
+    expect(q).toMatchObject({ secondScore: null, retrySkipped: true });
     expect(q.tries).toHaveLength(1);
   });
 });

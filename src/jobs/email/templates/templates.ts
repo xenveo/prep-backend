@@ -96,10 +96,10 @@ const TEMPLATES: {
 
   'export-ready': ({ link, expiresHours }) =>
     render('Your PrepPilot export is ready', [
-      { p: 'Your export has finished and is ready to download.' },
-      { button: 'Download export', href: link },
+      { p: 'Your export has finished.' },
+      { button: 'Get your export', href: link },
       {
-        p: `The link expires in ${plural(expiresHours, 'hour')}.`,
+        p: `It’s available for ${plural(expiresHours, 'hour')}.`,
         muted: true,
       },
     ]),

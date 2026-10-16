@@ -11,6 +11,22 @@ export function isValidEmail(email: string): boolean {
   return /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(email.trim());
 }
 
+/**
+ * A revoked candidate (never logged in, not erased) may be invited again through the normal flow,
+ * so their email doesn't count as taken. Everyone else, hidden users included, keeps it.
+ */
+export function canReinvite(user: {
+  role: string;
+  status: string;
+  deletedAt: Date | null;
+}): boolean {
+  return (
+    user.role === 'candidate' &&
+    user.status === 'revoked' &&
+    user.deletedAt === null
+  );
+}
+
 export type InviteValidationContext = {
   approvedRoleNames: Iterable<string>;
   /** Roles that exist but aren't approved yet ("Role not approved yet"). Archived roles count as unknown. */

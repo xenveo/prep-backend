@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import {
-  decodeCursor,
-  paginate,
+  keysetPage,
+  keysetWhere,
   paginationQuerySchema,
   type Page,
 } from '../../common/pagination/pagination.js';
@@ -39,7 +39,7 @@ export const SYSTEM_ACTOR = 'System';
 export class AuditQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Newest first. `to` includes the whole day. */
+  /** Newest first, keyset-paged on (at, id). `to` includes the whole day. */
   async list(query: AuditQuery): Promise<Page<AuditEventView>> {
     const where: Prisma.AuditLogWhereInput = {};
     if (query.actorId) where.actorId = query.actorId;
@@ -50,18 +50,19 @@ export class AuditQueryService {
         ...(query.to && { lt: nextDay(query.to) }),
       };
     }
-    const [rows, total] = await Promise.all([
+    const after = keysetWhere('at', query.cursor);
+    const [fetched, total] = await Promise.all([
       this.prisma.auditLog.findMany({
-        where,
+        where: after ? { AND: [where, after] } : where,
         orderBy: [{ at: 'desc' }, { id: 'desc' }],
-        skip: decodeCursor(query.cursor),
-        take: query.limit,
+        take: query.limit + 1,
       }),
       this.prisma.auditLog.count({ where }),
     ]);
+    const { rows, nextCursor } = keysetPage(fetched, query.limit, (r) => r);
     const names = await this.actorNames(rows.map((r) => r.actorId));
-    return paginate(
-      rows.map((r) => ({
+    return {
+      rows: rows.map((r) => ({
         id: r.id,
         actorId: r.actorId,
         actor: (r.actorId && names.get(r.actorId)) || SYSTEM_ACTOR,
@@ -70,10 +71,9 @@ export class AuditQueryService {
         ...(r.entityId && { itemRef: r.entityId }),
         at: r.at.toISOString(),
       })),
+      nextCursor,
       total,
-      query.cursor,
-      query.limit,
-    );
+    };
   }
 
   /** Distinct actions, sorted, for the "Action" filter. */

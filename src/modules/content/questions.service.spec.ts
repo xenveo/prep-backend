@@ -103,7 +103,7 @@ function setup(opts: { found?: unknown; roleStatus?: string } = {}) {
     quota as unknown as AiQuotaService,
     queue as unknown as QueueService,
   );
-  return { service, prisma, audit, evaluator, quota, queue };
+  return { service, prisma, roles, audit, evaluator, quota, queue };
 }
 
 const input = {
@@ -201,6 +201,21 @@ describe('QuestionsService.test', () => {
       status: 429,
     });
     expect(evaluator.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a question on an archived role before consuming quota', async () => {
+    const { service, roles, evaluator, prisma, quota } = setup();
+    roles.getEditableRow.mockRejectedValue(
+      new AppError('conflict', 409, "Archived roles can't be edited"),
+    );
+    await expect(service.test('q1', 'a', actor)).rejects.toMatchObject({
+      code: 'conflict',
+      status: 409,
+    });
+    expect(roles.getEditableRow).toHaveBeenCalledWith('role-1');
+    expect(quota.consume).not.toHaveBeenCalled();
+    expect(evaluator.evaluate).not.toHaveBeenCalled();
+    expect(prisma.question.update).not.toHaveBeenCalled();
   });
 });
 

@@ -552,7 +552,12 @@ describe('Reports and admin read models (e2e)', () => {
         formulaText: '20% first try + 55% second try + 25% learning = 72',
       });
       const [q1, q2] = body.questions;
-      expect(q1).toMatchObject({ n: 1, firstScore: 70, secondScore: 70 });
+      expect(q1).toMatchObject({
+        n: 1,
+        firstScore: 70,
+        secondScore: null,
+        retrySkipped: true,
+      });
       expect(q1.tries).toHaveLength(1);
       expect(q2).toMatchObject({ n: 2, firstScore: 60, secondScore: 75 });
       const [first, second] = q2.tries;
@@ -772,7 +777,7 @@ describe('Reports and admin read models (e2e)', () => {
         completedSession: 1,
         avgBaseline: 60,
         avgLatest: 60,
-        change: 0,
+        change: null,
       });
       expect(res.body.range.label).toMatch(/^Custom range · /);
       expect(res.body.hardestQuestions).toEqual([]);

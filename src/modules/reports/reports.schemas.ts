@@ -66,6 +66,16 @@ export const candidateExportSchema = z.preprocess(
   z.object({ ids: list(z.uuid()) }),
 );
 
+/** POST body for large selections, whose `?ids=` query would exceed Node's 16 KB header limit. */
+export const candidateExportBodySchema = z.object({
+  ids: z
+    .array(z.uuid())
+    .min(1)
+    .max(5000)
+    .transform((ids) => [...new Set(ids)]),
+});
+export type CandidateExportBody = z.output<typeof candidateExportBodySchema>;
+
 export const reportQuerySchema = z
   .object({
     roleId: z.uuid(),

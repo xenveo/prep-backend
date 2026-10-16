@@ -138,7 +138,8 @@ describe('RolesService.requirements', () => {
     expect(req.firstUnmet).toBe(
       'Add at least 6 questions with rubrics and a linked flash card',
     );
-    expect(req.approvedQuestions).toBe(7);
+    // Only the 5 linked questions with key points count, not all 7 approved ones.
+    expect(req.approvedQuestions).toBe(5);
     expect(req.approvedFlashCards).toBe(2);
     expect(req.candidatesToNotify).toBe(4);
   });
@@ -154,6 +155,7 @@ describe('RolesService.requirements', () => {
     const req = await service.requirements('role-1');
     expect(req.canApprove).toBe(false);
     expect(req.requirements[0]).toMatchObject({ id: 'questions', met: false });
+    expect(req.approvedQuestions).toBe(4);
   });
 
   it('needs an approved card', async () => {

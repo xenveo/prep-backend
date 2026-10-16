@@ -86,22 +86,26 @@ export function toTry(a: ReviewAttempt, audioUrl: string | null): Try {
 }
 
 /**
- * One question of the session. A skipped retry has a single try and its second score equals the
- * first (A2 = A1, plan §6 "Scoring").
+ * One question of the session. Without an attempt 2 (retry skipped or never answered) it has a
+ * single try and a null second score. The session aggregates still count a skipped retry as A2 = A1
+ * (plan §6 "Scoring"); those come from stored session fields, not from here.
  */
 export function toReviewQuestion(input: {
   position: number;
   text: string;
   category: string;
+  retrySkipped: boolean;
   first: Try;
   second: Try | null;
 }): ReviewQuestion {
+  const second = input.retrySkipped ? null : input.second;
   return {
     n: input.position,
     text: input.text,
     category: input.category,
     firstScore: input.first.score,
-    secondScore: input.second?.score ?? input.first.score,
-    tries: input.second ? [input.first, input.second] : [input.first],
+    secondScore: second?.score ?? null,
+    retrySkipped: input.retrySkipped,
+    tries: second ? [input.first, second] : [input.first],
   };
 }

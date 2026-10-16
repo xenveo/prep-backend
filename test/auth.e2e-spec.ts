@@ -126,6 +126,7 @@ describe('Auth (e2e)', () => {
       role: 'candidate',
       accessExpiresAt: null,
       audioRetentionDays: expect.any(Number),
+      candidatesCanDeleteData: expect.any(Boolean),
     });
 
     const after = await prisma.user.findUniqueOrThrow({

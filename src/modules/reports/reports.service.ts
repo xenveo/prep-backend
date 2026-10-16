@@ -9,6 +9,7 @@ import {
   emptyBands,
   needsAttention,
   pickHardest,
+  reportChange,
   reportCsvFilename,
   reportCsvRows,
   reportRange,
@@ -104,10 +105,11 @@ export class ReportsService {
         completedSession: practised.length,
         avgBaseline,
         avgLatest,
-        change:
-          avgBaseline === null || avgLatest === null
-            ? null
-            : avgLatest - avgBaseline,
+        change: reportChange(
+          avgBaseline,
+          avgLatest,
+          practised.map((c) => c.sessions_total),
+        ),
       },
       bandsLatest: countBands(latests),
       bandsBaseline: countBands(baselines),
