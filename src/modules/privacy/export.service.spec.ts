@@ -164,7 +164,7 @@ function setup(job: Record<string, unknown> | null, user: unknown = source) {
   const settings = { update: vi.fn().mockResolvedValue({}) };
   const audit = { record: vi.fn().mockResolvedValue(undefined) };
   const email = { send: vi.fn().mockResolvedValue(undefined) };
-  const config = { env: { PUBLIC_API_URL: 'https://api.test/' } };
+  const config = { env: { APP_ADMIN_ORIGIN: 'https://admin.test/' } };
   const storage = {
     put: vi.fn().mockResolvedValue(undefined),
     signedUrl: vi.fn((key: string) => Promise.resolve(`https://s/${key}`)),
@@ -224,7 +224,11 @@ describe('ExportService', () => {
       subjectId: 'u1',
       requestedBy: 'u1',
     });
-    await service.run({ exportJobId: 'e1', privacyRequestId: 'p1' }, NOW);
+    await service.run(
+      { exportJobId: 'e1', privacyRequestId: 'p1' },
+      { attempt: 1 },
+      NOW,
+    );
     expect(storage.put).toHaveBeenCalledWith(
       'exports/e1.json',
       expect.any(Buffer),
@@ -256,7 +260,11 @@ describe('ExportService', () => {
       { id: 'e1', kind: 'candidate_json', status: 'queued', subjectId: 'u1' },
       null,
     );
-    await service.run({ exportJobId: 'e1', privacyRequestId: 'p1' }, NOW);
+    await service.run(
+      { exportJobId: 'e1', privacyRequestId: 'p1' },
+      { attempt: 1 },
+      NOW,
+    );
     expect(email.send).not.toHaveBeenCalled();
     expect(prisma.privacyRequest.updateMany).not.toHaveBeenCalled();
     expect(prisma.exportJob.update).toHaveBeenLastCalledWith({
@@ -265,12 +273,12 @@ describe('ExportService', () => {
     });
   });
 
-  it('builds the workspace CSVs and emails the admin a link to the export', async () => {
+  it('builds the workspace CSVs and emails the admin a link to the privacy settings page', async () => {
     const { service, storage, email } = setup(
       { id: 'e1', kind: 'workspace_csv', status: 'queued', requestedBy: 'sa1' },
       { email: 'admin@x.test' },
     );
-    await service.run({ exportJobId: 'e1' }, NOW);
+    await service.run({ exportJobId: 'e1' }, { attempt: 1 }, NOW);
     expect(storage.put.mock.calls.map((c) => c[0])).toEqual([
       'exports/e1/candidates.csv',
       'exports/e1/sessions.csv',
@@ -279,7 +287,49 @@ describe('ExportService', () => {
     expect(email.send).toHaveBeenCalledWith({
       template: 'export-ready',
       to: 'admin@x.test',
-      vars: { link: 'https://api.test/api/admin/exports/e1', expiresHours: 24 },
+      vars: {
+        link: 'https://admin.test/settings/privacy?exportId=e1',
+        expiresHours: 24,
+      },
+    });
+  });
+
+  it('requeues a failed export while retries remain, without marking it failed', async () => {
+    const { service, prisma, storage } = setup({
+      id: 'e1',
+      kind: 'candidate_json',
+      status: 'queued',
+      subjectId: 'u1',
+    });
+    storage.put.mockRejectedValue(new Error('storage down'));
+    await expect(
+      service.run({ exportJobId: 'e1' }, { attempt: 2 }, NOW),
+    ).rejects.toThrow('storage down');
+    expect(prisma.exportJob.update).toHaveBeenLastCalledWith({
+      where: { id: 'e1' },
+      data: { status: 'queued' },
+    });
+    expect(prisma.exportJob.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'failed' }),
+      }),
+    );
+  });
+
+  it('marks the export failed when the last attempt throws', async () => {
+    const { service, prisma, storage } = setup({
+      id: 'e1',
+      kind: 'candidate_json',
+      status: 'running',
+      subjectId: 'u1',
+    });
+    storage.put.mockRejectedValue(new Error('storage down'));
+    await expect(
+      service.run({ exportJobId: 'e1' }, { attempt: 3 }, NOW),
+    ).rejects.toThrow('storage down');
+    expect(prisma.exportJob.update).toHaveBeenLastCalledWith({
+      where: { id: 'e1' },
+      data: { status: 'failed', finishedAt: expect.any(Date) },
     });
   });
 

@@ -1,4 +1,5 @@
 import {
+  canReinvite,
   isValidEmail,
   summariseInviteRows,
   validateInviteRows,
@@ -80,4 +81,19 @@ it('isValidEmail matches the admin UI rule', () => {
   expect(isValidEmail('a@b')).toBe(false);
   expect(isValidEmail('a b@c.de')).toBe(false);
   expect(isValidEmail('a@b.c;d')).toBe(false);
+});
+
+it('canReinvite allows only revoked, non-erased candidates', () => {
+  const user = (over: Record<string, unknown> = {}) => ({
+    role: 'candidate',
+    status: 'revoked',
+    deletedAt: null,
+    ...over,
+  });
+  expect(canReinvite(user())).toBe(true);
+  expect(canReinvite(user({ deletedAt: new Date() }))).toBe(false);
+  expect(canReinvite(user({ role: 'admin' }))).toBe(false);
+  expect(canReinvite(user({ role: 'super_admin' }))).toBe(false);
+  for (const status of ['invite_pending', 'active', 'deactivated'])
+    expect(canReinvite(user({ status }))).toBe(false);
 });

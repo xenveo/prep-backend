@@ -32,7 +32,66 @@ Admin settings and preview work are independent child tasks; this temporarily ex
 
 Pre-existing candidate changes observed before implementation: `components/prep/auth/code-entry.tsx`, `components/prep/chip.tsx`, `components/ui/button.tsx`. Preserve them; auth edits to code-entry must build on the user's working copy.
 
-## Verification evidence
+## Runtime acceptance (2026-10-16)
+
+Run on a machine with permitted networking. The backend Coordinator worked with one agent per frontend repository, all on fake LLM/STT/TTS providers and console mail.
+
+**Setup.** The API runs on **:4000** because another local project holds :3000. Backend `.env` sets `PORT=4000` and `PUBLIC_API_URL=http://localhost:4000`. Both frontends have a gitignored `.env.local` pointing at `http://localhost:4000/api`. `prep_db` was migrated and seeded. A separate `prep_db_e2e` (migrated and seeded) runs e2e via a `DATABASE_URL` override, so the dev data stays untouched. Redis is not configured, so queues are in-process.
+
+| Check | Result |
+| --- | --- |
+| Backend typecheck, lint, build | Passed |
+| Backend `npm test` (full, socket tests included) | 75 files / 584 tests passed |
+| Backend `npm run test:e2e` (against `prep_db_e2e`) | 7 files / 77 tests passed |
+| Admin typecheck (now `next typegen && tsc --noEmit`), lint, build | Passed; 26/26 pages |
+| Candidate typecheck, lint, build | Passed; 9/9 pages |
+| Candidate journeys in headless Chrome | Passed: OTP (wrong, cooldown, unknown email), study persistence and card gate, typed interview with retry/skip/double-submit/409 resume/reload, voice upload with WS event order and playback, mic denied → typed, abandon, logout invalidation, second-user isolation (404s), export and deletion requests |
+| Admin journeys (API and SSR) | Passed: auth/CSRF/role refusal, authoring and card linkage, approval requirements, preview exclusion, invites/revoke/resend/deactivate/assign, saved filters, CSVs, session review, flags, reports (incl. empty range), settings, admins, audit paging, AI config, workspace export |
+| Cross-check | Session score 39 (A1 49, A2 49, L 10) agrees between the candidate report, admin review and reports, and with the hand-computed SRS formula |
+
+**Fixes made during acceptance**
+
+- *Backend:*
+  - Removed admins and revoked candidates can be re-invited.
+  - Hidden users' emails count as taken in invite validation and are never sent to the client.
+  - Audit and privacy-request lists use a keyset `(timestamp, id)` cursor.
+  - Privacy export completion is race-safe and returns 409 while an export is in flight.
+  - Export status reaches `failed` only on the last retry.
+  - The export-ready email links to `/settings/privacy?exportId=`.
+  - New `POST /admin/candidates/export.csv {ids}`, max 5000, with a 256 KB JSON body limit.
+  - Session review returns `secondScore: number | null` plus `retrySkipped`.
+  - Report `stats.change` is null without a repeat session.
+  - `approvedQuestions` counts only qualifying questions.
+  - Testing a question on an archived role returns 409.
+  - CORS exposes `Content-Disposition`.
+  - The e2e `/me` assertion was updated for `candidatesCanDeleteData`.
+- *Admin UI:*
+  - typecheck script.
+  - Saved filters chosen by `isDefault`/query.
+  - Bogus band values tolerated; Revoked filter added.
+  - Skipped-retry and null-second-score rendering.
+  - Server CSV filenames.
+  - POST CSV export.
+  - `?exportId=` export page.
+  - Friendly settings errors.
+- *Candidate UI:* no changes.
+
+**Not covered here.**
+- Real providers and India residency.
+- The AI draft 202/job-status path and the AI quota 429, which can't be reached with the fake LLM.
+- Privacy-complete 409 with an export in flight (unit-tested only).
+- Natural OTP expiry.
+- Split API/worker with Redis.
+
+**Known limitation.** With the in-process queue, a process restart drops in-flight jobs. An export was seen stuck in `running` after a watch-mode restart. BullMQ retries stalled jobs. A startup recovery sweep is an open follow-up.
+
+**Open product questions.**
+- Audit action labels include counts ("Sent 3 invites"), which fragments the Action filter.
+- Admin candidate progress compares scores across roles.
+- The typed-answer "Delivery" score measures writing clarity but is unlabeled.
+- Abandoned sessions don't count toward the session limit.
+
+## Verification evidence (sandboxed run, 2026-10-15)
 
 - Local PostgreSQL process listens on port 5432, but both TCP connections and `/tmp` Unix socket connections are denied with `EPERM` by the execution sandbox. No database was provisioned, migrated or seeded by the Coordinator. Database-backed e2e and browser journeys remain blocked until a permitted connection is available.
 - Standard builds in both frontends fail inside the Turbopack CSS worker with port-binding `EPERM`. Both supported webpack alternatives fail resolving `fonts.googleapis.com` for the existing Google font dependencies (`Plus Jakarta Sans`, and candidate `Geist Mono`). Neither failure proves an application compile defect; neither counts as a successful production build.

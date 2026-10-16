@@ -6,8 +6,8 @@ import {
   notFound,
 } from '../../common/errors/app-error.js';
 import {
-  decodeCursor,
-  paginate,
+  keysetPage,
+  keysetWhere,
   type Page,
   type PaginationQuery,
 } from '../../common/pagination/pagination.js';
@@ -92,27 +92,27 @@ export class PrivacyService {
         { createdAt: { gte: new Date(now.getTime() - RECENT_DAYS * 864e5) } },
       ],
     };
-    const [rows, total] = await Promise.all([
+    const after = keysetWhere('createdAt', query.cursor);
+    const [fetched, total] = await Promise.all([
       this.prisma.privacyRequest.findMany({
-        where,
+        where: after ? { AND: [where, after] } : where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip: decodeCursor(query.cursor),
-        take: query.limit,
+        take: query.limit + 1,
         include: { user: { select: { name: true, email: true } } },
       }),
       this.prisma.privacyRequest.count({ where }),
     ]);
-    return paginate(
-      rows.map((r) => toView(r, r.user)),
-      total,
-      query.cursor,
-      query.limit,
-    );
+    const { rows, nextCursor } = keysetPage(fetched, query.limit, (r) => ({
+      at: r.createdAt,
+      id: r.id,
+    }));
+    return { rows: rows.map((r) => toView(r, r.user)), nextCursor, total };
   }
 
   /**
    * POST /admin/privacy/requests/:id/complete. Deletion starts erasure stage 1; export queues the
-   * candidate's bundle (emailed to them). Both are audited.
+   * candidate's bundle (emailed to them) unless one is already in flight (409). Both are audited.
+   * Only one caller can move a request out of pending; the other gets a 409.
    */
   async complete(
     id: string,
@@ -127,16 +127,20 @@ export class PrivacyService {
     if (request.status !== 'pending')
       throw conflict('This request has already been handled');
     const kind = request.kind as PrivacyKind;
+    if (kind === 'export' && (await this.exportInFlight(request.userId)))
+      throw conflict('An export for this candidate is already in progress');
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const row = await tx.privacyRequest.update({
-        where: { id: request.id },
-        data: {
-          status: 'completed',
-          completedAt: new Date(),
-          completedBy: actorId,
-        },
+    const completion = {
+      status: 'completed',
+      completedAt: new Date(),
+      completedBy: actorId,
+    };
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.privacyRequest.updateMany({
+        where: { id: request.id, status: 'pending' },
+        data: completion,
       });
+      if (count === 0) throw conflict('This request has already been handled');
       await this.audit.record(
         {
           actorId,
@@ -148,7 +152,6 @@ export class PrivacyService {
         },
         tx,
       );
-      return row;
     });
 
     if (kind === 'deletion') {
@@ -164,7 +167,19 @@ export class PrivacyService {
     } else {
       await this.exports.startCandidateExport(request.userId, actorId);
     }
-    return toView(updated, request.user);
+    return toView({ ...request, ...completion }, request.user);
+  }
+
+  private async exportInFlight(subjectId: string): Promise<boolean> {
+    const job = await this.prisma.exportJob.findFirst({
+      where: {
+        subjectId,
+        kind: 'candidate_json',
+        status: { in: ['queued', 'running'] },
+      },
+      select: { id: true },
+    });
+    return job !== null;
   }
 
   private pendingRequest(userId: string, kind: PrivacyKind) {

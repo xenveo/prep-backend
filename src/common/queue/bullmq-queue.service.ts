@@ -1,18 +1,36 @@
 import { Logger, OnModuleDestroy } from '@nestjs/common';
-import { Queue, QueueEvents, Worker, type JobsOptions } from 'bullmq';
+import {
+  Queue,
+  QueueEvents,
+  UnrecoverableError,
+  Worker,
+  type JobsOptions,
+} from 'bullmq';
 import type { Env } from '../../config/env.js';
 import type { RedisService } from '../infra/redis.service.js';
 import { assertJobId } from './job-id.js';
-import { JOB_OUTCOME_LIMIT, JOB_OUTCOME_TTL_MS } from './queue.types.js';
+import {
+  JOB_OUTCOME_LIMIT,
+  JOB_OUTCOME_TTL_MS,
+  PermanentJobError,
+} from './queue.types.js';
 import type {
   JobHandler,
   JobOptions,
+  ProcessOptions,
   QueueJob,
   QueueName,
   QueueService,
 } from './queue.types.js';
 
-/** Redis-backed QueueService (plan §8). Workers only start where PROCESS_ROLE is `worker` or `all`. */
+/** Finished jobs other than AI drafts: kept for inspection, then dropped so Redis doesn't grow. */
+const COMPLETED_RETENTION_SEC = 24 * 3600;
+const FAILED_RETENTION_SEC = 7 * 24 * 3600;
+
+/**
+ * Redis-backed QueueService (plan §8). Workers only start where PROCESS_ROLE is `worker` or `all`.
+ * Every Queue, Worker and QueueEvents uses the app's Redis prefix instead of BullMQ's `bull`.
+ */
 export class BullMqQueueService implements QueueService, OnModuleDestroy {
   private readonly logger = new Logger('Queue');
   private readonly queues = new Map<QueueName, Queue>();
@@ -105,21 +123,34 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
   process<T, R>(
     queue: QueueName,
     handler: JobHandler<T, R>,
-    opts: { concurrency?: number } = {},
+    opts: ProcessOptions = {},
   ): void {
     if (this.role === 'api') return;
     if (this.workers.has(queue))
       throw new Error(`A processor is already registered for queue ${queue}`);
     const worker = new Worker(
       queue,
-      (job) =>
-        handler(job.data as T, {
-          jobId: job.id!,
-          attempt: job.attemptsMade + 1,
-        }),
+      async (job) => {
+        try {
+          return await handler(job.data as T, {
+            jobId: job.id!,
+            attempt: job.attemptsMade + 1,
+          });
+        } catch (err) {
+          // BullMQ skips the remaining attempts only for its own error type.
+          if (err instanceof PermanentJobError)
+            throw new UnrecoverableError(err.message);
+          throw err;
+        }
+      },
       {
         connection: this.redis.duplicate({ maxRetriesPerRequest: null }),
+        prefix: this.redis.prefix,
         concurrency: Math.max(1, opts.concurrency ?? 1),
+        limiter: opts.limiter && {
+          max: opts.limiter.max,
+          duration: opts.limiter.durationMs,
+        },
       },
     );
     worker.on('failed', (job, err) => {
@@ -169,18 +200,21 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
       removeOnComplete:
         queue === 'ai-draft'
           ? { age: JOB_OUTCOME_TTL_MS / 1000, count: JOB_OUTCOME_LIMIT }
-          : { count: 100 },
+          : { age: COMPLETED_RETENTION_SEC },
       removeOnFail:
         queue === 'ai-draft'
           ? { age: JOB_OUTCOME_TTL_MS / 1000, count: JOB_OUTCOME_LIMIT }
-          : { age: 24 * 3600 },
+          : { age: FAILED_RETENTION_SEC },
     };
   }
 
   private queue(name: QueueName): Queue {
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = new Queue(name, { connection: this.redis.client! });
+      queue = new Queue(name, {
+        connection: this.redis.client!,
+        prefix: this.redis.prefix,
+      });
       this.queues.set(name, queue);
     }
     return queue;
@@ -191,6 +225,7 @@ export class BullMqQueueService implements QueueService, OnModuleDestroy {
     if (!events) {
       events = new QueueEvents(name, {
         connection: this.redis.duplicate({ maxRetriesPerRequest: null }),
+        prefix: this.redis.prefix,
       });
       this.events.set(name, events);
     }

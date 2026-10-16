@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { ActivityService } from '../activity/activity.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import {
+  canReinvite,
   isValidEmail,
   summariseInviteRows,
   validateInviteRows,
@@ -26,6 +27,14 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 type Db = PrismaService | Prisma.TransactionClient;
+
+type ReadyRow = {
+  email: string;
+  name: string | null;
+  roleIds: string[];
+  /** A revoked candidate being invited again: their row is reused instead of created. */
+  reuseId: string | null;
+};
 
 export type IssuedInvite = { token: string; expiresDays: number };
 
@@ -51,7 +60,7 @@ export class InvitesService {
         select: { title: true, status: true },
         orderBy: { title: 'asc' },
       }),
-      this.prisma.user.findMany({ select: { email: true } }),
+      this.emailOwners(),
     ]);
     return {
       approvedRoleNames: roles
@@ -60,11 +69,15 @@ export class InvitesService {
       draftRoleNames: roles
         .filter((r) => r.status === 'draft')
         .map((r) => r.title),
-      existingEmails: users.map((u) => u.email),
+      // Hidden users' emails never reach the client; `validate` still reports them as taken.
+      existingEmails: takenEmails(users.filter((u) => u.deletedAt === null)),
     };
   }
 
-  /** Authoritative CSV check: `already_invited` means a (non-erased) user has the email. */
+  /**
+   * Authoritative CSV check: `already_invited` means a user holds the email, erased-but-not-purged
+   * ones included, unless they are a revoked candidate who may be invited again.
+   */
   async validate(
     rows: InviteRowInput[],
   ): Promise<{ rows: InviteRow[]; summary: InviteSummary }> {
@@ -73,12 +86,7 @@ export class InvitesService {
         where: { status: { in: ['approved', 'draft'] } },
         select: { title: true, status: true },
       }),
-      this.prisma.user.findMany({
-        where: {
-          email: { in: rows.map((r) => r.email.trim()).filter(isValidEmail) },
-        },
-        select: { email: true },
-      }),
+      this.emailOwners(rows.map((r) => r.email.trim()).filter(isValidEmail)),
     ]);
     const result = validateInviteRows(rows, {
       approvedRoleNames: roles
@@ -87,15 +95,15 @@ export class InvitesService {
       draftRoleNames: roles
         .filter((r) => r.status === 'draft')
         .map((r) => r.title),
-      existingEmails: users.map((u) => u.email),
+      existingEmails: takenEmails(users),
     });
     return { rows: result, summary: summariseInviteRows(result) };
   }
 
   /**
    * Creates an invite-pending candidate per valid row, with role assignments and an invite link,
-   * then emails them. Rows with a bad or taken email, no roles, or a role that isn't approved are
-   * skipped.
+   * then emails them. A revoked candidate's row is reused the same way. Rows with a bad or taken
+   * email, no roles, or a role that isn't approved are skipped.
    */
   async invite(
     admin: AuthUser,
@@ -103,37 +111,39 @@ export class InvitesService {
     ip: string | null,
   ): Promise<InviteBatchResult> {
     const roleIds = [...new Set(body.rows.flatMap((r) => r.roleIds))];
-    const [roles, taken] = await Promise.all([
+    const [roles, owners] = await Promise.all([
       this.prisma.jobRole.findMany({
         where: { id: { in: roleIds.filter(isUuid) }, status: 'approved' },
         select: { id: true, title: true },
       }),
-      // Erased-but-not-purged users still hold their email, so check without the erasure filter.
-      this.prisma.unfiltered.user.findMany({
-        where: {
-          email: {
-            in: body.rows.map((r) => r.email.trim()).filter(isValidEmail),
-          },
-        },
-        select: { email: true },
-      }),
+      this.emailOwners(
+        body.rows.map((r) => r.email.trim()).filter(isValidEmail),
+      ),
     ]);
     const approved = new Map(roles.map((r) => [r.id, r.title]));
-    const used = new Set(taken.map((u) => u.email.toLowerCase()));
+    const used = new Set(takenEmails(owners).map((e) => e.toLowerCase()));
+    const reusable = new Map(
+      owners.filter(canReinvite).map((u) => [u.email.toLowerCase(), u]),
+    );
 
-    const ready: { email: string; name: string | null; roleIds: string[] }[] =
-      [];
+    const ready: ReadyRow[] = [];
     for (const row of body.rows) {
-      const email = row.email.trim().toLowerCase();
+      const key = row.email.trim().toLowerCase();
       const ids = [...new Set(row.roleIds)];
       const ok =
-        isValidEmail(email) &&
-        !used.has(email) &&
+        isValidEmail(key) &&
+        !used.has(key) &&
         ids.length > 0 &&
         ids.every((id) => approved.has(id));
       if (!ok) continue;
-      used.add(email);
-      ready.push({ email, name: row.name.trim() || null, roleIds: ids });
+      used.add(key);
+      const prior = reusable.get(key);
+      ready.push({
+        email: prior?.email ?? key,
+        name: row.name.trim() || null,
+        roleIds: ids,
+        reuseId: prior?.id ?? null,
+      });
     }
 
     const batch = await this.prisma.inviteBatch.create({
@@ -146,14 +156,24 @@ export class InvitesService {
       },
     });
     const { inviteLinkExpiryDays } = await this.settings.get();
-    const created: {
-      id: string;
-      email: string;
-      name: string | null;
-      roleIds: string[];
-      token: string;
-    }[] = [];
+    const created: (ReadyRow & { id: string; token: string })[] = [];
     for (const row of ready) {
+      const { reuseId } = row;
+      if (reuseId) {
+        const token = await this.prisma.$transaction((tx) =>
+          this.reinviteRevoked(
+            tx,
+            { ...row, id: reuseId },
+            body,
+            admin.id,
+            inviteLinkExpiryDays,
+            batch.id,
+          ),
+        );
+        // Changed concurrently (e.g. erased or invited by someone else): skip the row.
+        if (token) created.push({ ...row, id: reuseId, token });
+        continue;
+      }
       try {
         const made = await this.prisma.$transaction(async (tx) => {
           const user = await tx.user.create({
@@ -229,6 +249,81 @@ export class InvitesService {
       skipped,
       candidateIds: created.map((c) => c.id),
     };
+  }
+
+  /** Users holding any of `emails` (all users when omitted), erased-but-not-purged ones included. */
+  private emailOwners(emails?: string[]) {
+    return this.prisma.unfiltered.user.findMany({
+      where: emails ? { email: { in: emails } } : {},
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        deletedAt: true,
+      },
+    });
+  }
+
+  /**
+   * Turns a revoked candidate back into a pending invite with the row's name, roles and limits, as a
+   * new invite would have them: other roles are removed, earlier links stay dead and a fresh one is
+   * issued. Returns its token, or null if the user is no longer a revoked, non-erased candidate.
+   */
+  private async reinviteRevoked(
+    tx: Prisma.TransactionClient,
+    user: { id: string; email: string; name: string | null; roleIds: string[] },
+    body: InviteBatchBody,
+    adminId: string,
+    expiresDays: number,
+    batchId: string,
+  ): Promise<string | null> {
+    const { count } = await tx.user.updateMany({
+      where: {
+        id: user.id,
+        role: 'candidate',
+        status: 'revoked',
+        deletedAt: null,
+      },
+      data: {
+        name: user.name,
+        status: 'invite_pending',
+        accessExpiresAt: body.accessUntil ?? null,
+      },
+    });
+    if (count === 0) return null;
+    const now = new Date();
+    await tx.roleAssignment.updateMany({
+      where: {
+        userId: user.id,
+        removedAt: null,
+        jobRoleId: { notIn: user.roleIds },
+      },
+      data: { removedAt: now },
+    });
+    for (const jobRoleId of user.roleIds) {
+      const assignment = {
+        assignedBy: adminId,
+        assignedAt: now,
+        maxAttempts: body.maxSessions ?? null,
+      };
+      await tx.roleAssignment.upsert({
+        where: { userId_jobRoleId: { userId: user.id, jobRoleId } },
+        update: { ...assignment, removedAt: null },
+        create: { ...assignment, userId: user.id, jobRoleId },
+      });
+    }
+    await tx.invite.updateMany({
+      where: { userId: user.id, status: 'pending' },
+      data: { status: 'expired' },
+    });
+    const { token } = await this.issueInvite(
+      tx,
+      { userId: user.id, email: user.email, invitedBy: adminId },
+      expiresDays,
+      batchId,
+    );
+    return token;
   }
 
   /** Re-sends invites to invite-pending candidates: earlier links expire and a fresh one is mailed. */
@@ -353,3 +448,13 @@ function loginLink(origin: string, email: string, token: string): string {
 }
 
 const isUuid = (id: string) => idSchema.safeParse(id).success;
+
+/** Emails that can't be invited: every owner except a revoked candidate who may be invited again. */
+const takenEmails = (
+  owners: {
+    email: string;
+    role: string;
+    status: string;
+    deletedAt: Date | null;
+  }[],
+) => owners.filter((u) => !canReinvite(u)).map((u) => u.email);

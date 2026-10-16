@@ -78,7 +78,13 @@ describe('Auth (e2e)', () => {
   }
 
   it('GET /api/health is public', async () => {
-    await http().get('/api/health').expect(200, { status: 'ok', db: 'ok' });
+    const res = await http().get('/api/health').expect(200);
+    // `redis` is 'disabled' in the in-memory e2e run and 'ok' when REDIS_URL is set.
+    expect(res.body).toEqual({
+      status: 'ok',
+      db: 'ok',
+      redis: expect.stringMatching(/^(disabled|ok)$/),
+    });
   });
 
   it('an invited user logs in, becomes active and sees /me', async () => {
@@ -126,6 +132,7 @@ describe('Auth (e2e)', () => {
       role: 'candidate',
       accessExpiresAt: null,
       audioRetentionDays: expect.any(Number),
+      candidatesCanDeleteData: expect.any(Boolean),
     });
 
     const after = await prisma.user.findUniqueOrThrow({
@@ -165,10 +172,15 @@ describe('Auth (e2e)', () => {
   });
 
   it('hides erased users from reads (erasure stage 1)', async () => {
-    const user = await createUser('erased', { status: 'active', deletedAt: new Date() });
+    const user = await createUser('erased', {
+      status: 'active',
+      deletedAt: new Date(),
+    });
     expect(await prisma.user.findUnique({ where: { id: user.id } })).toBeNull();
     expect(await prisma.user.count({ where: { email: user.email } })).toBe(0);
-    expect(await prisma.unfiltered.user.findUnique({ where: { id: user.id } })).not.toBeNull();
+    expect(
+      await prisma.unfiltered.user.findUnique({ where: { id: user.id } }),
+    ).not.toBeNull();
     expect((await requestCode(user.email)).body).toEqual({ result: 'sent' });
     expect(lastCodeFor(user.email)).toBeUndefined();
   });

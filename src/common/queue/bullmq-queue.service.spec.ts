@@ -1,16 +1,63 @@
+import { UnrecoverableError } from 'bullmq';
 import type { RedisService } from '../infra/redis.service.js';
 import { BullMqQueueService } from './bullmq-queue.service.js';
-import { JOB_OUTCOME_LIMIT, JOB_OUTCOME_TTL_MS } from './queue.types.js';
+import {
+  JOB_OUTCOME_LIMIT,
+  JOB_OUTCOME_TTL_MS,
+  PermanentJobError,
+} from './queue.types.js';
 
-const mocks = vi.hoisted(() => ({ getJob: vi.fn(), add: vi.fn() }));
+type Processor = (job: {
+  id: string;
+  data: unknown;
+  attemptsMade: number;
+}) => Promise<unknown>;
+
+const mocks = vi.hoisted(() => ({
+  getJob: vi.fn(),
+  add: vi.fn(),
+  queues: [] as { name: string; opts: { prefix?: string } }[],
+  events: [] as { name: string; opts: { prefix?: string } }[],
+  workers: [] as {
+    name: string;
+    processor: Processor;
+    opts: Record<string, unknown>;
+  }[],
+}));
 vi.mock('bullmq', () => ({
   Queue: class {
     getJob = mocks.getJob;
     add = mocks.add;
+    constructor(name: string, opts: { prefix?: string }) {
+      mocks.queues.push({ name, opts });
+    }
   },
-  QueueEvents: class {},
-  Worker: class {},
+  QueueEvents: class {
+    waitUntilReady = () => Promise.resolve();
+    constructor(name: string, opts: { prefix?: string }) {
+      mocks.events.push({ name, opts });
+    }
+  },
+  Worker: class {
+    on = vi.fn();
+    constructor(
+      name: string,
+      processor: Processor,
+      opts: Record<string, unknown>,
+    ) {
+      mocks.workers.push({ name, processor, opts });
+    }
+  },
+  UnrecoverableError: class extends Error {
+    name = 'UnrecoverableError';
+  },
 }));
+
+const redis = {
+  client: {},
+  prefix: 'preppilot',
+  duplicate: () => ({}),
+} as unknown as RedisService;
 
 describe('BullMqQueueService job status', () => {
   const now = new Date('2026-10-15T10:00:00Z');
@@ -21,7 +68,7 @@ describe('BullMqQueueService job status', () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     vi.clearAllMocks();
-    service = new BullMqQueueService({ client: {} } as RedisService, 'api');
+    service = new BullMqQueueService(redis, 'api');
   });
   afterEach(() => vi.useRealTimers());
 
@@ -138,16 +185,88 @@ describe('BullMqQueueService job status', () => {
     );
   });
 
-  it('preserves existing retention for queues other than AI drafting', async () => {
+  it('keeps other finished jobs for 24 h (completed) and 7 days (failed)', async () => {
     mocks.add.mockResolvedValue({ id: '42' });
-    await service.add('email', { to: 'private' });
+    await service.add('email', { emailId: 'e1' });
     expect(mocks.add).toHaveBeenCalledWith(
       'email',
-      { to: 'private' },
+      { emailId: 'e1' },
       expect.objectContaining({
-        removeOnComplete: { count: 100 },
-        removeOnFail: { age: 24 * 3600 },
+        removeOnComplete: { age: 24 * 3600 },
+        removeOnFail: { age: 7 * 24 * 3600 },
       }),
     );
+  });
+});
+
+describe('BullMqQueueService Redis namespacing and workers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.queues.length = 0;
+    mocks.events.length = 0;
+    mocks.workers.length = 0;
+    mocks.add.mockResolvedValue({
+      id: 'j1',
+      waitUntilFinished: () => new Promise(() => undefined),
+    });
+  });
+
+  it('puts every Queue, QueueEvents and Worker under the app prefix', async () => {
+    const service = new BullMqQueueService(redis, 'all');
+    await service.add('export', { exportJobId: 'x' });
+    await service.addAndWait('ai-draft', {}, 1);
+    service.process('attempt', () => Promise.resolve());
+    const all = [...mocks.queues, ...mocks.events, ...mocks.workers];
+    expect(all.map((c) => c.name).sort()).toEqual([
+      'ai-draft',
+      'ai-draft',
+      'attempt',
+      'export',
+    ]);
+    for (const c of all) expect(c.opts.prefix).toBe('preppilot');
+  });
+
+  it('passes the limiter to the worker in BullMQ form', () => {
+    const service = new BullMqQueueService(redis, 'worker');
+    service.process('email', () => Promise.resolve(), {
+      concurrency: 3,
+      limiter: { max: 2, durationMs: 1000 },
+    });
+    service.process('export', () => Promise.resolve());
+    expect(mocks.workers[0].opts).toMatchObject({
+      concurrency: 3,
+      limiter: { max: 2, duration: 1000 },
+    });
+    expect(mocks.workers[1].opts.limiter).toBeUndefined();
+  });
+
+  it('turns a PermanentJobError into an UnrecoverableError and passes other errors through', async () => {
+    const service = new BullMqQueueService(redis, 'worker');
+    const transient = new Error('try again');
+    const handler = vi
+      .fn()
+      .mockRejectedValueOnce(new PermanentJobError('rejected recipient'))
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValueOnce('ok');
+    service.process('email', handler);
+    const run = mocks.workers[0].processor;
+    const job = { id: 'email-1', data: { emailId: 'e1' }, attemptsMade: 0 };
+
+    const permanent = await run(job).catch((e: unknown) => e);
+    expect(permanent).toBeInstanceOf(UnrecoverableError);
+    expect((permanent as Error).message).toBe('rejected recipient');
+    await expect(run(job)).rejects.toBe(transient);
+    await expect(run({ ...job, attemptsMade: 2 })).resolves.toBe('ok');
+    expect(handler).toHaveBeenLastCalledWith(
+      { emailId: 'e1' },
+      { jobId: 'email-1', attempt: 3 },
+    );
+  });
+
+  it('starts no worker in the api role', () => {
+    new BullMqQueueService(redis, 'api').process('email', () =>
+      Promise.resolve(),
+    );
+    expect(mocks.workers).toEqual([]);
   });
 });

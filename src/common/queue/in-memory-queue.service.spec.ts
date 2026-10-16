@@ -1,6 +1,10 @@
 import { InMemoryQueueService } from './in-memory-queue.service.js';
 import { Logger } from '@nestjs/common';
-import { JOB_OUTCOME_LIMIT, JOB_OUTCOME_TTL_MS } from './queue.types.js';
+import {
+  JOB_OUTCOME_LIMIT,
+  JOB_OUTCOME_TTL_MS,
+  PermanentJobError,
+} from './queue.types.js';
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -72,6 +76,34 @@ describe('InMemoryQueueService', () => {
     await expect(
       queue.addAndWait('attempt', {}, 1000, { attempts: 2, backoffMs: 1 }),
     ).rejects.toThrow('nope');
+  });
+
+  it('does not retry a PermanentJobError', async () => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    let runs = 0;
+    queue.process('email', async () => {
+      runs++;
+      throw new PermanentJobError('rejected recipient');
+    });
+    await expect(
+      queue.addAndWait('email', {}, 1000, { attempts: 3, backoffMs: 1 }),
+    ).rejects.toBeInstanceOf(PermanentJobError);
+    await queue.drain();
+    expect(runs).toBe(1);
+  });
+
+  it('ignores the rate limiter in-process', async () => {
+    let runs = 0;
+    queue.process(
+      'email',
+      async () => {
+        runs++;
+      },
+      { limiter: { max: 1, durationMs: 60_000 } },
+    );
+    await Promise.all([queue.add('email', 1), queue.add('email', 2)]);
+    await queue.drain();
+    expect(runs).toBe(2);
   });
 
   it('dedupes by jobId while the job is pending', async () => {

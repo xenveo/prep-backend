@@ -5,7 +5,11 @@ import type { EventBus, Unsubscribe } from './event-bus.types.js';
 
 type Handler = (event: any) => void;
 
-/** Redis pub/sub EventBus: publishes on the shared client, listens on one dedicated subscriber connection. */
+/**
+ * Redis pub/sub EventBus: publishes on the shared client, listens on one dedicated subscriber
+ * connection. Callers use bare channel names (`session:<id>`); on the wire each is namespaced with
+ * the app's Redis prefix, because pub/sub is server-wide and ignores the DB index.
+ */
 export class RedisEventBus implements EventBus, OnModuleDestroy {
   private readonly logger = new Logger('EventBus');
   private readonly handlers = new Map<string, Set<Handler>>();
@@ -14,7 +18,10 @@ export class RedisEventBus implements EventBus, OnModuleDestroy {
   constructor(private readonly redis: RedisService) {}
 
   async publish(channel: string, event: object): Promise<void> {
-    await this.redis.client!.publish(channel, JSON.stringify(event));
+    await this.redis.client!.publish(
+      this.redis.key(channel),
+      JSON.stringify(event),
+    );
   }
 
   async subscribe(channel: string, handler: Handler): Promise<Unsubscribe> {
@@ -22,14 +29,14 @@ export class RedisEventBus implements EventBus, OnModuleDestroy {
     if (!set) {
       set = new Set();
       this.handlers.set(channel, set);
-      await this.connection().subscribe(channel);
+      await this.connection().subscribe(this.redis.key(channel));
     }
     set.add(handler);
     return async () => {
       const current = this.handlers.get(channel);
       if (!current?.delete(handler) || current.size > 0) return;
       this.handlers.delete(channel);
-      await this.subscriber?.unsubscribe(channel);
+      await this.subscriber?.unsubscribe(this.redis.key(channel));
     };
   }
 
@@ -40,9 +47,11 @@ export class RedisEventBus implements EventBus, OnModuleDestroy {
   private connection(): Redis {
     if (!this.subscriber) {
       this.subscriber = this.redis.duplicate();
-      this.subscriber.on('message', (channel, message) =>
-        this.dispatch(channel, message),
-      );
+      const wirePrefix = this.redis.key('');
+      this.subscriber.on('message', (wireChannel: string, message: string) => {
+        if (wireChannel.startsWith(wirePrefix))
+          this.dispatch(wireChannel.slice(wirePrefix.length), message);
+      });
     }
     return this.subscriber;
   }

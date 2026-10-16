@@ -18,6 +18,11 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   /** Unset = in-process queue, pub/sub and rate limits (single process only). */
   REDIS_URL: z.string().optional(),
+  /** Namespace for every Redis key, BullMQ queue and pub/sub channel; pub/sub ignores the DB index, so a shared server needs it. */
+  REDIS_PREFIX: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .default('preppilot'),
 
   STORAGE_PROVIDER: z.enum(['s3', 'local']).default('local'),
   S3_BUCKET: z.string().optional(),
@@ -58,8 +63,21 @@ export const envSchema = z.object({
   DEEPGRAM_API_KEY: z.string().optional(),
   TTS_PROVIDER: z.enum(['elevenlabs', 'fake']).default('fake'),
   ELEVENLABS_API_KEY: z.string().optional(),
-  MAIL_PROVIDER: z.enum(['ses', 'console']).default('console'),
+  MAIL_PROVIDER: z.enum(['resend', 'ses', 'console']).default('console'),
   MAIL_FROM: z.string().default('no-reply@preppilot.local'),
+  RESEND_API_KEY: z.string().optional(),
+  /** Comma-separated addresses or "@domain" suffixes. When set, only these recipients get real mail; the rest go to the console outbox. */
+  MAIL_ALLOWLIST: z
+    .string()
+    .optional()
+    .transform((v) =>
+      (v ?? '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  /** Provider send rate; the email queue is limited to it. */
+  MAIL_RATE_PER_SECOND: z.coerce.number().int().min(1).default(2),
   SES_REGION: z.string().default('ap-south-1'),
 
   LOG_LEVEL: z

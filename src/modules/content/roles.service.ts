@@ -375,7 +375,8 @@ export class RolesService {
       firstUnmet,
       requirements,
       approvedFlashCards,
-      approvedQuestions: questions.length,
+      // Only questions that count towards the requirement, so the number and the check agree.
+      approvedQuestions: ready,
       candidatesToNotify,
     };
   }

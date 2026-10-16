@@ -87,6 +87,7 @@ export class SessionReviewService {
           position: sq.position,
           text: sq.question.text,
           category: sq.question.category,
+          retrySkipped: sq.retrySkipped,
           first: await tryOf(first),
           second: second ? await tryOf(second) : null,
         }),

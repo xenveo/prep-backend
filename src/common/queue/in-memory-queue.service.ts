@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { Logger, OnModuleDestroy } from '@nestjs/common';
 import type { Env } from '../../config/env.js';
 import { assertJobId } from './job-id.js';
-import { JOB_OUTCOME_LIMIT, JOB_OUTCOME_TTL_MS } from './queue.types.js';
+import {
+  JOB_OUTCOME_LIMIT,
+  JOB_OUTCOME_TTL_MS,
+  PermanentJobError,
+} from './queue.types.js';
 import type {
   JobHandler,
   JobOptions,
+  ProcessOptions,
   QueueJob,
   QueueName,
   QueueService,
@@ -40,8 +45,9 @@ type QueueState = {
 /**
  * In-process QueueService for dev without Redis and for tests (plan §8). Same semantics as the
  * BullMQ implementation within one process: jobId dedupe while pending, delays, retries with
- * exponential backoff, a per-queue concurrency limit. Jobs added before their processor registers
- * wait for it. Nothing survives a restart.
+ * exponential backoff (none after a PermanentJobError), a per-queue concurrency limit. The rate
+ * limiter is ignored. Jobs added before their processor registers wait for it. Nothing survives a
+ * restart.
  */
 export class InMemoryQueueService implements QueueService, OnModuleDestroy {
   private readonly logger = new Logger('Queue');
@@ -98,7 +104,7 @@ export class InMemoryQueueService implements QueueService, OnModuleDestroy {
   process<T, R>(
     queue: QueueName,
     handler: JobHandler<T, R>,
-    opts: { concurrency?: number } = {},
+    opts: ProcessOptions = {},
   ): void {
     if (this.role === 'api') return;
     const state = this.state(queue);
@@ -222,7 +228,9 @@ export class InMemoryQueueService implements QueueService, OnModuleDestroy {
       this.logger.warn(
         `Job failed: queue=${queue} jobId=${job.id} attempt=${job.attempt}/${job.maxAttempts} (${name})`,
       );
-      outcome = job.attempt < job.maxAttempts ? null : { ok: false, error };
+      const retry =
+        job.attempt < job.maxAttempts && !(error instanceof PermanentJobError);
+      outcome = retry ? null : { ok: false, error };
     }
     state.running--;
 

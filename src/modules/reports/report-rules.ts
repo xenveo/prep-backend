@@ -114,6 +114,19 @@ export const roundedMean = (values: number[]): number | null =>
     ? Math.round(values.reduce((a, b) => a + b, 0) / values.length)
     : null;
 
+/**
+ * avgLatest − avgBaseline. Null until some candidate in the report has 2+ completed sessions;
+ * before that baseline and latest are the same session (candidate detail's change is null too).
+ */
+export function reportChange(
+  avgBaseline: number | null,
+  avgLatest: number | null,
+  sessionCounts: number[],
+): number | null {
+  if (avgBaseline === null || avgLatest === null) return null;
+  return sessionCounts.some((n) => n >= 2) ? avgLatest - avgBaseline : null;
+}
+
 export type QuestionAgg = {
   questionId: string;
   question: string;

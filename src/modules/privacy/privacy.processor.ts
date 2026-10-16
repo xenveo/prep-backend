@@ -39,7 +39,7 @@ export class PrivacyProcessor implements OnModuleInit {
     );
     this.queue.process<ExportJobData, void>(
       'export',
-      (job) => this.exports.run(job),
+      (job, meta) => this.exports.run(job, meta),
       { concurrency: 2 },
     );
     this.queue.process<ErasureHideJob, void>('erasure-hide', (job) =>

@@ -45,6 +45,9 @@ export type WorkspaceExportView = {
 
 const EXPORT_LINK_TTL_MS = EXPORT_LINK_TTL_SEC * 1000;
 
+/** Tries per export job, the first included. */
+const EXPORT_ATTEMPTS = 3;
+
 /** Workspace CSV and candidate JSON exports (plan §8 `export`, NFR-06). */
 @Injectable()
 export class ExportService {
@@ -124,8 +127,15 @@ export class ExportService {
     return { status: 'done', files };
   }
 
-  /** The `export` job processor. */
-  async run(data: ExportJobData, now = new Date()): Promise<void> {
+  /**
+   * The `export` job processor. A thrown error is retried by the queue, so the job goes back to
+   * `queued` and only the last attempt marks it `failed` (pollers treat `failed` as terminal).
+   */
+  async run(
+    data: ExportJobData,
+    meta: { attempt: number },
+    now = new Date(),
+  ): Promise<void> {
     const job = await this.prisma.exportJob.findUnique({
       where: { id: data.exportJobId },
     });
@@ -154,7 +164,10 @@ export class ExportService {
     } catch (err) {
       await this.prisma.exportJob.update({
         where: { id: job.id },
-        data: { status: 'failed', finishedAt: new Date() },
+        data:
+          meta.attempt >= EXPORT_ATTEMPTS
+            ? { status: 'failed', finishedAt: new Date() }
+            : { status: 'queued' },
       });
       throw err;
     }
@@ -172,7 +185,7 @@ export class ExportService {
     await this.queue.add<ExportJobData>(
       'export',
       { exportJobId: job.id, privacyRequestId },
-      { jobId: `export-${job.id}`, attempts: 3, backoffMs: 5000 },
+      { jobId: `export-${job.id}`, attempts: EXPORT_ATTEMPTS, backoffMs: 5000 },
     );
     return job;
   }
@@ -270,7 +283,8 @@ export class ExportService {
       select: { email: true },
     });
     if (admin) {
-      const link = `${this.config.env.PUBLIC_API_URL.replace(/\/+$/, '')}/api/admin/exports/${jobId}`;
+      // The admin UI page lists the files with fresh signed links; the API route needs a cookie.
+      const link = `${this.config.env.APP_ADMIN_ORIGIN.replace(/\/+$/, '')}/settings/privacy?exportId=${jobId}`;
       await this.email.send({
         template: 'export-ready',
         to: admin.email,

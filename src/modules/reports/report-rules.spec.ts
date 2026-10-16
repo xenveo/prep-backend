@@ -6,6 +6,7 @@ import {
   needsAttention,
   pickHardest,
   rangeWithBasis,
+  reportChange,
   reportCsvFilename,
   reportCsvRows,
   reportRange,
@@ -175,6 +176,19 @@ describe('needsAttention', () => {
   });
 });
 
+describe('reportChange', () => {
+  it('is latest − baseline once some candidate has two sessions', () => {
+    expect(reportChange(50, 60, [1, 2])).toBe(10);
+    expect(reportChange(60, 55, [3])).toBe(-5);
+    expect(reportChange(60, 60, [2])).toBe(0);
+  });
+
+  it('is null while every candidate has a single session, or there is no data', () => {
+    expect(reportChange(60, 60, [1, 1])).toBeNull();
+    expect(reportChange(null, null, [])).toBeNull();
+  });
+});
+
 describe('report CSV', () => {
   const report: Report = {
     roleId: 'r',
@@ -247,6 +261,20 @@ describe('report CSV', () => {
         '',
       ].join('\r\n'),
     );
+  });
+
+  it('leaves Change empty when it is null, like the other null metrics', () => {
+    const csv = toCsv(
+      reportCsvRows(
+        {
+          ...report,
+          stats: { ...report.stats, avgBaseline: null, change: null },
+        },
+        'completed',
+      ),
+    ).split('\r\n');
+    expect(csv).toContain('Average baseline,');
+    expect(csv).toContain('Change,');
   });
 
   it('names the file after the role and end date', () => {

@@ -3,7 +3,6 @@ import { RedisService } from '../infra/redis.service.js';
 
 export type RateLimitResult = { allowed: boolean; retryAfterSec: number };
 
-const KEY_PREFIX = 'rl:';
 const SWEEP_AT = 10_000;
 
 /** INCR, start the window on the first hit (or if the key somehow lost its TTL), return count and TTL. */
@@ -19,7 +18,8 @@ return {n, ttl}
 
 /**
  * Fixed-window rate limiter (plan §5 "Rate limits"). Redis when configured, so limits hold across
- * instances; otherwise an in-process map. Keys are opaque: callers hash anything personal (emails).
+ * instances (stored as `<prefix>:rl:<key>`); otherwise an in-process map. Keys are opaque: callers
+ * hash anything personal (emails).
  */
 @Injectable()
 export class RateLimiter {
@@ -40,7 +40,7 @@ export class RateLimiter {
       const [count, ttl] = (await client.eval(
         CONSUME_SCRIPT,
         1,
-        KEY_PREFIX + key,
+        this.redis.key('rl', key),
         windowSec,
       )) as [number, number];
       return count <= limit
@@ -51,7 +51,8 @@ export class RateLimiter {
   }
 
   async reset(key: string): Promise<void> {
-    if (this.redis.client) await this.redis.client.del(KEY_PREFIX + key);
+    if (this.redis.client)
+      await this.redis.client.del(this.redis.key('rl', key));
     else this.windows.delete(key);
   }
 

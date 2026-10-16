@@ -6,7 +6,11 @@ import {
   notFound,
   validationFailed,
 } from '../../common/errors/app-error.js';
-import type { Prisma, User } from '../../generated/prisma/client.js';
+import type {
+  Prisma,
+  User,
+  UserStatus,
+} from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { InvitesService } from './invites.service.js';
@@ -19,6 +23,15 @@ const ADMIN_ROLES: Access[] = ['admin', 'super_admin'];
 const accessLabel = (a: Access) =>
   a === 'super_admin' ? 'Super admin' : 'Admin';
 const LAST_SUPER_ADMIN = 'There must be at least one Super admin';
+const EMAIL_TAKEN = 'Already an admin or invited';
+
+/** Statuses of a removed admin, whose row a new invite reuses (remove() sets `revoked`). */
+const REMOVED_STATUSES: UserStatus[] = ['revoked', 'deactivated'];
+const REMOVED_ADMIN = {
+  deletedAt: null,
+  role: { in: ADMIN_ROLES },
+  status: { in: REMOVED_STATUSES },
+} satisfies Prisma.UserWhereInput;
 
 type AdminRow = User & { invites: { sentAt: Date }[] };
 
@@ -46,33 +59,58 @@ export class AdminsService {
     return rows.map(toAdminView);
   }
 
-  /** Invites a new admin by email. The email must not belong to any user (409). */
+  /**
+   * Invites an admin by email. A removed admin (revoked or deactivated) is re-invited on their
+   * existing row; any other user with the email is a 409.
+   */
   async invite(
     actor: AuthUser,
     input: { email: string; access: Access },
     ip: string | null,
   ): Promise<AdminView> {
-    const taken = await this.prisma.unfiltered.user.findUnique({
+    const existing = await this.prisma.unfiltered.user.findUnique({
       where: { email: input.email },
-      select: { id: true },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        deletedAt: true,
+      },
     });
-    if (taken) throw conflict('Already an admin or invited');
+    if (existing && !isRemovedAdmin(existing)) throw conflict(EMAIL_TAKEN);
     const { inviteLinkExpiryDays } = await this.settings.get();
     const { user, token } = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email: input.email,
-          role: input.access,
-          status: 'invite_pending',
-        },
+      if (!existing) {
+        const user = await tx.user.create({
+          data: {
+            email: input.email,
+            role: input.access,
+            status: 'invite_pending',
+          },
+        });
+        const { token } = await this.invites.issueInvite(
+          tx,
+          { userId: user.id, email: user.email, invitedBy: actor.id },
+          inviteLinkExpiryDays,
+        );
+        return { user, token };
+      }
+      // Conditional on still being removed, so a concurrent re-invite can't issue a second link.
+      const { count } = await tx.user.updateMany({
+        where: { id: existing.id, ...REMOVED_ADMIN },
+        data: { role: input.access, status: 'invite_pending' },
       });
-      const { token } = await this.invites.issueInvite(
+      if (count === 0) throw conflict(EMAIL_TAKEN);
+      const { token } = await this.invites.reissue(
         tx,
-        { userId: user.id, email: user.email, invitedBy: actor.id },
+        { userId: existing.id, email: existing.email, invitedBy: actor.id },
         inviteLinkExpiryDays,
       );
-      return { user, token };
+      return { user: existing, token };
     });
+    // Removal already signed them out; this guarantees no old session revives once they accept.
+    if (existing) await this.users.revokeSessions(user.id);
     await this.audit.record({
       actorId: actor.id,
       action: 'Invited an admin',
@@ -229,6 +267,16 @@ async function assertAnotherSuperAdmin(
     },
   });
   if (others === 0) throw validationFailed(LAST_SUPER_ADMIN);
+}
+
+function isRemovedAdmin(
+  user: Pick<User, 'role' | 'status' | 'deletedAt'>,
+): boolean {
+  return (
+    user.deletedAt === null &&
+    (ADMIN_ROLES as string[]).includes(user.role) &&
+    REMOVED_STATUSES.includes(user.status)
+  );
 }
 
 function toAdminView(user: AdminRow): AdminView {

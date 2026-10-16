@@ -1,6 +1,7 @@
 import { AppError } from '../../common/errors/app-error.js';
 import { ZodPipe } from '../../common/validation/zod.pipe.js';
 import {
+  candidateExportBodySchema,
   candidateExportSchema,
   candidateQuerySchema,
   reportQuerySchema,
@@ -58,6 +59,29 @@ describe('candidateExportSchema', () => {
       ids: [A, B],
     });
     expect(candidateExportSchema.parse({})).toEqual({});
+  });
+});
+
+describe('candidateExportBodySchema', () => {
+  const parse = (b: unknown) =>
+    new ZodPipe(candidateExportBodySchema).transform(b);
+
+  it('dedupes ids', () => {
+    expect(parse({ ids: [A, B, A] })).toEqual({ ids: [A, B] });
+  });
+
+  it('rejects a missing, empty, malformed or oversized list with 400', () => {
+    const many = Array.from({ length: 5001 }, () => A);
+    for (const b of [
+      {},
+      { ids: [] },
+      { ids: ['x'] },
+      { ids: A },
+      { ids: many },
+    ]) {
+      expect(() => parse(b)).toThrow(AppError);
+    }
+    expect(parse({ ids: many.slice(0, 5000) })).toEqual({ ids: [A] });
   });
 });
 

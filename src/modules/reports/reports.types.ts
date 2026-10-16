@@ -116,8 +116,11 @@ export type ReviewQuestion = {
   text: string;
   category?: string;
   firstScore: number;
-  secondScore: number;
-  /** One element when the retry was skipped (the UI type says `[Try, Try]`). */
+  /** null without an attempt 2, whether the retry was skipped or never answered. */
+  secondScore: number | null;
+  /** session_questions.retry_skipped. Not in the UI type yet. */
+  retrySkipped: boolean;
+  /** One element without an attempt 2 (the UI type says `[Try, Try]`). */
   tries: Try[];
 };
 
@@ -196,6 +199,7 @@ export type Report = {
     completedSession: number;
     avgBaseline: number | null;
     avgLatest: number | null;
+    /** avgLatest − avgBaseline; null until some candidate in the report has 2 sessions. */
     change: number | null;
   };
   bandsLatest: BandCounts;

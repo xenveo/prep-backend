@@ -217,7 +217,8 @@ export class QuestionsService {
   ): Promise<TestEvaluation> {
     const question = await this.getQuestion(questionId, this.prisma);
     if (question.status === 'archived') throw notFound('Question not found');
-    const role = await this.roles.getRow(question.jobRoleId);
+    // Archived roles are read-only: reject before spending AI quota or writing sampleEvaluation.
+    const role = await this.roles.getEditableRow(question.jobRoleId);
     await this.quota.consume(actor.id);
     const rubric = question.rubric as Rubric;
     const result = await this.evaluator.evaluate({

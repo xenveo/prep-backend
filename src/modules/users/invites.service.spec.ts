@@ -21,13 +21,18 @@ function setup() {
     user: {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(({ data }) => ({ id: `u${++n}`, ...data })),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     invite: { create: vi.fn(), updateMany: vi.fn() },
     inviteBatch: {
       create: vi.fn().mockResolvedValue({ id: 'batch-1' }),
       update: vi.fn(),
     },
-    roleAssignment: { createMany: vi.fn() },
+    roleAssignment: {
+      createMany: vi.fn(),
+      updateMany: vi.fn(),
+      upsert: vi.fn(),
+    },
     $transaction: vi.fn(),
     unfiltered: { user: { findMany: vi.fn().mockResolvedValue([]) } },
   };
@@ -54,6 +59,15 @@ function setup() {
   return { service, prisma, email, activity, audit };
 }
 
+const owner = (over: Record<string, unknown> = {}) => ({
+  id: 'u-old',
+  email: 'old@example.com',
+  role: 'candidate',
+  status: 'active',
+  deletedAt: null,
+  ...over,
+});
+
 describe('InvitesService', () => {
   it('validate checks rows against approved and draft roles and existing users', async () => {
     const { service, prisma } = setup();
@@ -61,7 +75,9 @@ describe('InvitesService', () => {
       { title: 'Store Manager', status: 'approved' },
       { title: 'Analyst', status: 'draft' },
     ]);
-    prisma.user.findMany.mockResolvedValue([{ email: 'taken@example.com' }]);
+    prisma.unfiltered.user.findMany.mockResolvedValue([
+      owner({ email: 'taken@example.com' }),
+    ]);
     const res = await service.validate([
       { email: 'new@example.com', name: 'New', roles: ['store manager'] },
       { email: 'taken@example.com', name: 'T', roles: ['Store Manager'] },
@@ -81,7 +97,7 @@ describe('InvitesService', () => {
       { id: R1, title: 'Store Manager' },
     ]);
     prisma.unfiltered.user.findMany.mockResolvedValue([
-      { email: 'taken@example.com' },
+      owner({ email: 'taken@example.com' }),
     ]);
     const until = new Date('2026-12-31T23:59:59.999Z');
     const res = await service.invite(
@@ -156,6 +172,164 @@ describe('InvitesService', () => {
     expect(link.origin + link.pathname).toBe('https://app.test/login/code');
     expect(link.searchParams.get('email')).toBe('neha@example.com');
     expect(sha256Hex(link.searchParams.get('token')!)).toBe(invite.tokenHash);
+  });
+
+  it('validate treats a revoked candidate as invitable and a hidden user as taken; context hides hidden users', async () => {
+    const { service, prisma } = setup();
+    prisma.jobRole.findMany.mockResolvedValue([
+      { title: 'Store Manager', status: 'approved' },
+    ]);
+    const owners = [
+      owner({ email: 'revoked@example.com', status: 'revoked' }),
+      owner({
+        email: 'erased@example.com',
+        status: 'active',
+        deletedAt: new Date(),
+      }),
+      owner({
+        email: 'erased-revoked@example.com',
+        status: 'revoked',
+        deletedAt: new Date(),
+      }),
+      owner({ email: 'admin@example.com', role: 'admin', status: 'revoked' }),
+      owner({ email: 'off@example.com', status: 'deactivated' }),
+    ];
+    prisma.unfiltered.user.findMany.mockResolvedValue(owners);
+    const res = await service.validate(
+      owners.map((o) => ({
+        email: o.email,
+        name: '',
+        roles: ['Store Manager'],
+      })),
+    );
+    expect(res.rows.map((r) => r.result)).toEqual([
+      'ready',
+      'already_invited',
+      'already_invited',
+      'already_invited',
+      'already_invited',
+    ]);
+    expect(prisma.user.findMany).not.toHaveBeenCalled();
+
+    const ctx = await service.getContext();
+    expect(ctx.existingEmails).toEqual([
+      'admin@example.com',
+      'off@example.com',
+    ]);
+  });
+
+  it('invite reuses a revoked candidate: pending again, fresh token, counted and emailed', async () => {
+    const { service, prisma, email, audit, activity } = setup();
+    prisma.jobRole.findMany.mockResolvedValue([
+      { id: R1, title: 'Store Manager' },
+    ]);
+    prisma.unfiltered.user.findMany.mockResolvedValue([
+      owner({ id: 'u-rev', email: 'rev@example.com', status: 'revoked' }),
+      owner({
+        id: 'u-gone',
+        email: 'gone@example.com',
+        status: 'revoked',
+        deletedAt: new Date(),
+      }),
+    ]);
+    const until = new Date('2026-12-31T23:59:59.999Z');
+    const res = await service.invite(
+      admin,
+      {
+        source: 'csv',
+        accessUntil: until,
+        maxSessions: 2,
+        rows: [
+          { email: 'Rev@Example.com', name: 'Neha', roleIds: [R1] },
+          { email: 'gone@example.com', name: 'G', roleIds: [R1] },
+        ],
+      },
+      null,
+    );
+    expect(res).toEqual({
+      batchId: 'batch-1',
+      sent: 1,
+      skipped: 1,
+      candidateIds: ['u-rev'],
+    });
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'u-rev',
+        role: 'candidate',
+        status: 'revoked',
+        deletedAt: null,
+      },
+      data: { name: 'Neha', status: 'invite_pending', accessExpiresAt: until },
+    });
+    expect(prisma.roleAssignment.updateMany.mock.calls[0][0]).toMatchObject({
+      where: { userId: 'u-rev', removedAt: null, jobRoleId: { notIn: [R1] } },
+    });
+    const upsert = prisma.roleAssignment.upsert.mock.calls[0][0];
+    expect(upsert.where).toEqual({
+      userId_jobRoleId: { userId: 'u-rev', jobRoleId: R1 },
+    });
+    expect(upsert.update).toMatchObject({
+      removedAt: null,
+      assignedBy: 'adm-1',
+      maxAttempts: 2,
+    });
+    expect(upsert.create).toMatchObject({
+      userId: 'u-rev',
+      jobRoleId: R1,
+      assignedBy: 'adm-1',
+      maxAttempts: 2,
+    });
+    expect(prisma.invite.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u-rev', status: 'pending' },
+      data: { status: 'expired' },
+    });
+    const invite = prisma.invite.create.mock.calls[0][0].data;
+    expect(invite).toMatchObject({
+      userId: 'u-rev',
+      email: 'rev@example.com',
+      batchId: 'batch-1',
+    });
+    expect(prisma.inviteBatch.update).toHaveBeenCalledWith({
+      where: { id: 'batch-1' },
+      data: { sent: 1, skipped: 1 },
+    });
+    expect(audit.record.mock.calls[0][0]).toMatchObject({
+      action: 'Sent 1 invite',
+      after: { candidateIds: ['u-rev'] },
+    });
+    expect(activity.record).toHaveBeenCalledWith(
+      'u-rev',
+      'Invited by Arjun Mehta',
+    );
+    const job = email.send.mock.calls[0][0];
+    expect(job).toMatchObject({
+      template: 'candidate-invite',
+      to: 'rev@example.com',
+      vars: { name: 'Neha', roleTitles: ['Store Manager'] },
+    });
+    const token = new URL(job.vars.link).searchParams.get('token')!;
+    expect(sha256Hex(token)).toBe(invite.tokenHash);
+  });
+
+  it('invite skips a revoked candidate that changed concurrently', async () => {
+    const { service, prisma, email } = setup();
+    prisma.jobRole.findMany.mockResolvedValue([{ id: R1, title: 'S' }]);
+    prisma.unfiltered.user.findMany.mockResolvedValue([
+      owner({ id: 'u-rev', email: 'rev@example.com', status: 'revoked' }),
+    ]);
+    prisma.user.updateMany.mockResolvedValue({ count: 0 });
+    const res = await service.invite(
+      admin,
+      {
+        source: 'single',
+        rows: [{ email: 'rev@example.com', name: '', roleIds: [R1] }],
+      },
+      null,
+    );
+    expect(res).toMatchObject({ sent: 0, skipped: 1, candidateIds: [] });
+    expect(prisma.invite.create).not.toHaveBeenCalled();
+    expect(email.send).not.toHaveBeenCalled();
   });
 
   it('invite skips a row whose email was taken concurrently (P2002)', async () => {

@@ -1,4 +1,5 @@
 import type { AuditService } from '../../common/audit/audit.service.js';
+import { encodeKeyset } from '../../common/pagination/pagination.js';
 import type { QueueService } from '../../common/queue/queue.types.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import { DEFAULT_WORKSPACE_SETTINGS } from '../settings/settings.schema.js';
@@ -13,21 +14,26 @@ function setup(opts: {
   canDelete?: boolean;
   pending?: { id: string } | null;
   request?: Record<string, unknown> | null;
+  /** The in-flight candidate export job, if any. */
+  exportJob?: { id: string } | null;
+  /** Rows updated by the pending → completed transition (0 = another admin won the race). */
+  updatedCount?: number;
 }) {
   const tx = {
     privacyRequest: {
-      update: vi
-        .fn()
-        .mockImplementation(({ data }) =>
-          Promise.resolve({ ...opts.request, ...data }),
-        ),
+      updateMany: vi.fn().mockResolvedValue({ count: opts.updatedCount ?? 1 }),
     },
   };
   const prisma = {
     privacyRequest: {
       findFirst: vi.fn().mockResolvedValue(opts.pending ?? null),
       findUnique: vi.fn().mockResolvedValue(opts.request ?? null),
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
       create: vi.fn().mockResolvedValue({ id: 'p-new' }),
+    },
+    exportJob: {
+      findFirst: vi.fn().mockResolvedValue(opts.exportJob ?? null),
     },
     $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
   };
@@ -108,8 +114,8 @@ describe('PrivacyService', () => {
       request: request('deletion'),
     });
     const view = await service.complete(ID, 'sa1', '1.1.1.1');
-    expect(tx.privacyRequest.update).toHaveBeenCalledWith({
-      where: { id: ID },
+    expect(tx.privacyRequest.updateMany).toHaveBeenCalledWith({
+      where: { id: ID, status: 'pending' },
       data: expect.objectContaining({
         status: 'completed',
         completedBy: 'sa1',
@@ -138,10 +144,111 @@ describe('PrivacyService', () => {
   });
 
   it('completing an export runs the candidate export', async () => {
-    const { service, exports, queue } = setup({ request: request('export') });
+    const { service, exports, queue, prisma } = setup({
+      request: request('export'),
+    });
     await service.complete(ID, 'sa1', null);
+    expect(prisma.exportJob.findFirst).toHaveBeenCalledWith({
+      where: {
+        subjectId: 'u1',
+        kind: 'candidate_json',
+        status: { in: ['queued', 'running'] },
+      },
+      select: { id: true },
+    });
     expect(exports.startCandidateExport).toHaveBeenCalledWith('u1', 'sa1');
     expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('409 and no state change when the candidate export is already in flight', async () => {
+    const { service, exports, audit, prisma, tx } = setup({
+      request: request('export'),
+      exportJob: { id: 'e-running' },
+    });
+    await expect(service.complete(ID, 'sa1', null)).rejects.toMatchObject({
+      code: 'conflict',
+      status: 409,
+      message: 'An export for this candidate is already in progress',
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.privacyRequest.updateMany).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+    expect(exports.startCandidateExport).not.toHaveBeenCalled();
+  });
+
+  it.each(['deletion', 'export'])(
+    'a concurrent %s completion loses the race with a 409 and no side effects',
+    async (kind) => {
+      const { service, exports, audit, queue } = setup({
+        request: request(kind),
+        updatedCount: 0,
+      });
+      await expect(service.complete(ID, 'sa1', null)).rejects.toMatchObject({
+        code: 'conflict',
+        message: 'This request has already been handled',
+      });
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(queue.add).not.toHaveBeenCalled();
+      expect(exports.startCandidateExport).not.toHaveBeenCalled();
+    },
+  );
+
+  it('lists newest first and ANDs the keyset onto the pending-or-recent OR', async () => {
+    const { service, prisma } = setup({});
+    const now = new Date('2026-10-16T00:00:00Z');
+    const since = new Date('2026-09-16T00:00:00Z');
+    const filter = {
+      OR: [{ status: 'pending' }, { createdAt: { gte: since } }],
+    };
+    const cursor = encodeKeyset({ at: CREATED, id: ID });
+    await service.list({ limit: 10, cursor }, now);
+    expect(prisma.privacyRequest.findMany).toHaveBeenCalledWith({
+      where: {
+        AND: [
+          filter,
+          {
+            OR: [
+              { createdAt: { lt: CREATED } },
+              { createdAt: CREATED, id: { lt: ID } },
+            ],
+          },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 11,
+      include: { user: { select: { name: true, email: true } } },
+    });
+    expect(prisma.privacyRequest.count).toHaveBeenCalledWith({ where: filter });
+  });
+
+  it('pages with a cursor past the last row only when more rows exist', async () => {
+    const rows = [0, 1, 2].map((n) => ({
+      ...request('export'),
+      id: `00000000-0000-4000-8000-00000000000${n}`,
+      createdAt: new Date(CREATED.getTime() - n * 1000),
+    }));
+    const { service, prisma } = setup({});
+    prisma.privacyRequest.findMany.mockResolvedValue(rows);
+    prisma.privacyRequest.count.mockResolvedValue(3);
+    const first = await service.list({ limit: 2 });
+    expect(first.rows.map((r) => r.id)).toEqual([rows[0].id, rows[1].id]);
+    expect(first.total).toBe(3);
+    expect(first.nextCursor).toBe(
+      encodeKeyset({ at: rows[1].createdAt, id: rows[1].id }),
+    );
+
+    prisma.privacyRequest.findMany.mockResolvedValue(rows.slice(2));
+    const last = await service.list({ limit: 2, cursor: first.nextCursor! });
+    expect(last.rows).toHaveLength(1);
+    expect(last.nextCursor).toBeNull();
+  });
+
+  it('a malformed list cursor is a 400', async () => {
+    const { service, prisma } = setup({});
+    await expect(
+      service.list({ limit: 10, cursor: 'garbage' }),
+    ).rejects.toMatchObject({ code: 'validation_failed', status: 400 });
+    expect(prisma.privacyRequest.findMany).not.toHaveBeenCalled();
   });
 
   it('404 for unknown or malformed ids, 409 when already handled', async () => {

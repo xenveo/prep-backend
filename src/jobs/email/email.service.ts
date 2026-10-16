@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   QUEUE_SERVICE,
@@ -21,6 +22,9 @@ export class EmailService {
 
   async send(job: EmailJob): Promise<void> {
     await this.queue.add('email', job, {
+      // Unique per send: the processor passes it to the provider as the idempotency key, and queue
+      // ids alone restart after a Redis reset and repeat across environments.
+      jobId: `email-${randomUUID()}`,
       attempts: ATTEMPTS,
       backoffMs: BACKOFF_MS,
     });

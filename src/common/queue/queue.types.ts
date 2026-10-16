@@ -24,6 +24,23 @@ export type JobOptions = {
   backoffMs?: number;
 };
 
+export type ProcessOptions = {
+  concurrency?: number;
+  /** At most `max` jobs per `durationMs` across all workers (BullMQ limiter); in-process runs ignore it. */
+  limiter?: { max: number; durationMs: number };
+};
+
+/**
+ * Thrown by a handler for a failure that retrying can't fix (e.g. a recipient the mail provider
+ * rejects). The job fails at once instead of using its remaining attempts.
+ */
+export class PermanentJobError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PermanentJobError';
+  }
+}
+
 export type JobHandler<T = unknown, R = unknown> = (
   data: T,
   meta: { jobId: string; attempt: number },
@@ -62,7 +79,7 @@ export interface QueueService {
   process<T, R>(
     queue: QueueName,
     handler: JobHandler<T, R>,
-    opts?: { concurrency?: number },
+    opts?: ProcessOptions,
   ): void;
   /** Removes waiting or delayed jobs whose id starts with the prefix (erasure cancels a user's jobs). */
   removeByPrefix(queue: QueueName, jobIdPrefix: string): Promise<number>;
