@@ -85,6 +85,8 @@ describe('LocalStorageAdapter', () => {
 
   it('maps content types from the extension', () => {
     expect(contentTypeFor('a/b.webm')).toBe('audio/webm');
+    expect(contentTypeFor('audio/s1/a1.mp4')).toBe('audio/mp4');
+    expect(contentTypeFor('tts/abc.wav')).toBe('audio/wav');
     expect(contentTypeFor('exports/x.csv')).toContain('text/csv');
     expect(contentTypeFor('x.bin')).toBe('application/octet-stream');
   });
