@@ -64,7 +64,7 @@ Login is passwordless with a 6-digit email code. One login flow serves all three
 **Verify** — `POST /auth/verify {email, code}` → `{result: "ok" | "wrong" | "expired"}`
 
 - After 5 wrong tries the code is burned and verify returns `expired`. The UI then shows "Send a new code".
-- On `ok`: mark a pending invite `accepted`, create a server-side session row, and set cookie `pp_session`. The cookie is opaque, random, `HttpOnly; Secure; SameSite=Lax`, with a 7-day sliding expiry. The row is stored as a hash.
+- On `ok`: mark a pending invite `accepted`, create a server-side session row, and set cookie `pp_session` (`pp_admin_session` when the request comes from the admin app, so the two apps don't sign each other out). The cookie is opaque, random, `HttpOnly; Secure; SameSite=Lax`, with a 7-day sliding expiry. The row is stored as a hash.
 
 **Session**
 

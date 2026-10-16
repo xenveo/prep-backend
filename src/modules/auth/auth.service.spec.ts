@@ -74,12 +74,10 @@ function setup(envOver: object = {}) {
   const email = { send: vi.fn() };
   const activity = { record: vi.fn() };
   const settings = {
-    get: vi
-      .fn()
-      .mockResolvedValue({
-        audioRetentionDays: 30,
-        candidatesCanDeleteData: true,
-      }),
+    get: vi.fn().mockResolvedValue({
+      audioRetentionDays: 30,
+      candidatesCanDeleteData: true,
+    }),
   };
   const service = new AuthService(
     prisma as unknown as PrismaService,
@@ -332,6 +330,30 @@ describe('AuthService', () => {
       expect(other.prisma.authCode.findFirst).toHaveBeenCalled();
       expect(other.tx.authSession.create).not.toHaveBeenCalled();
       expect(tx.authSession.create).toHaveBeenCalled();
+    });
+
+    it('sends no code and applies no request limit to allowlisted emails', async () => {
+      const { service, prisma, rateLimiter, email } = setup({
+        AUTH_DEV_ACCEPT_ANY_CODE: true,
+        AUTH_DEV_ANY_CODE_ALLOWLIST: [EMAIL],
+      });
+      prisma.user.findUnique.mockResolvedValue(user());
+      rateLimiter.consume.mockResolvedValue({
+        allowed: false,
+        retryAfterSec: 99,
+      });
+      // People sharing one any-code account can't use up its limit and lock each other out.
+      for (let i = 0; i < 10; i++)
+        await expect(service.requestCode(EMAIL, '1.2.3.4')).resolves.toEqual({
+          result: 'sent',
+        });
+      expect(rateLimiter.consume).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+      expect(prisma.authCode.create).not.toHaveBeenCalled();
+
+      await expect(
+        service.requestCode('someone@other.com', '1.2.3.4'),
+      ).resolves.toEqual({ result: 'rate-limited', retryAfterSec: 99 });
     });
 
     it('still refuses unknown and ineligible users', async () => {

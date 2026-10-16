@@ -56,6 +56,9 @@ export class AuthService {
   /** Always `sent` unless rate-limited, so the response never reveals who is invited (FR-AUTH-03). */
   async requestCode(email: string, ip: string): Promise<RequestCodeResponse> {
     const env = this.config.env;
+    // Any-code accounts need no emailed code, so there is nothing to send or rate-limit; several people
+    // sharing one such account would otherwise use up its hourly limit and lock each other out.
+    if (this.acceptsAnyCode(email)) return { result: 'sent' };
     const emailKey = sha256Hex(email);
     const limits: [string, number, number][] = [
       [`otp:ip:${ip}`, env.OTP_IP_REQUESTS_PER_HOUR, 3600],
@@ -161,12 +164,7 @@ export class AuthService {
     code: string,
   ): Promise<VerifyOutcome> {
     const now = new Date();
-    const env = this.config.env;
-    if (
-      env.AUTH_DEV_ACCEPT_ANY_CODE &&
-      isAllowlisted(email, env.AUTH_DEV_ANY_CODE_ALLOWLIST)
-    )
-      return this.verifyAnyCode(email, now);
+    if (this.acceptsAnyCode(email)) return this.verifyAnyCode(email, now);
     const authCode = await this.prisma.authCode.findFirst({
       where: { email, usedAt: null, expiresAt: { gt: now } },
       orderBy: { createdAt: 'desc' },
@@ -205,6 +203,14 @@ export class AuthService {
   }
 
   /** AUTH_DEV_ACCEPT_ANY_CODE: skips the code check but keeps eligibility, and burns any live codes. */
+  private acceptsAnyCode(email: string): boolean {
+    const env = this.config.env;
+    return (
+      env.AUTH_DEV_ACCEPT_ANY_CODE &&
+      isAllowlisted(email, env.AUTH_DEV_ANY_CODE_ALLOWLIST)
+    );
+  }
+
   private async verifyAnyCode(
     email: string,
     now: Date,

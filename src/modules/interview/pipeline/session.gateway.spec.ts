@@ -74,6 +74,7 @@ const auth = (
   authorizeUpgrade(r as any, {
     prisma: prisma as unknown as PrismaService,
     allowedOrigins: [ORIGIN, 'http://localhost:3002', 'http://localhost:3000'],
+    adminOrigin: 'http://localhost:3002',
   });
 
 describe('matchSessionPath / parseCookie', () => {
@@ -110,6 +111,21 @@ describe('authorizeUpgrade', () => {
       cookie: `pp_session=${TOKEN}`,
     });
     await expect(auth(r)).resolves.toMatchObject({ ok: true });
+  });
+
+  it("reads the admin app's own cookie for upgrades from the admin origin", async () => {
+    const both = { cookie: `pp_session=other; pp_admin_session=${TOKEN}` };
+    await expect(
+      auth(
+        req(`/ws/sessions/${SESSION_ID}`, {
+          ...both,
+          origin: 'http://localhost:3002',
+        }),
+      ),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      auth(req(`/ws/sessions/${SESSION_ID}`, { ...both, origin: ORIGIN })),
+    ).resolves.toEqual({ ok: false, status: 401 });
   });
 
   it('rejects a foreign Origin with 403', async () => {
