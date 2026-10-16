@@ -1,0 +1,78 @@
+{
+  "description": "ILLUSTRATIVE SAMPLE, NOT A CALIBRATION SET. 8 synthetic answers written by a developer (no real candidate data), with scores assigned by that developer, not by subject-matter experts. Use it to check the script and the format only; its agreement numbers mean nothing.",
+  "items": [
+    {
+      "id": "sample-cs-01-strong",
+      "roleSlug": "customer-support-associate",
+      "questionText": "Tell me about a time you handled an upset customer. What did you do?",
+      "mode": "typed",
+      "answerText": "In my last job at a phone shop, a customer came in furious because his repaired phone had been promised for Monday and it was now Thursday. I let him explain everything without interrupting and told him I understood why he was frustrated, because he needed the phone for work. I said I would own it until it was sorted. I checked the repair log and found the part had been delayed by the supplier and nobody had called him. I got the part moved to our express queue, lent him a spare handset for the day, and gave him my direct number. The phone was ready the next morning. I called him that afternoon to check it was working, and he left us a five-star review. Since then I always update customers before a deadline is missed, not after.",
+      "humanScores": { "content": 5, "structure": 5, "delivery": 4, "relevance": 5 },
+      "notes": "Synthetic. Strong STAR answer covering all four key points."
+    },
+    {
+      "id": "sample-cs-02-weak",
+      "roleSlug": "customer-support-associate",
+      "questionText": "Tell me about a time you handled an upset customer. What did you do?",
+      "mode": "typed",
+      "answerText": "A customer was angry about a late delivery. It wasn't really my fault, the warehouse team messed it up as usual. I told him he would have to wait like everyone else and it got sorted eventually I think.",
+      "humanScores": { "content": 2, "structure": 2, "delivery": 3, "relevance": 3 },
+      "notes": "Synthetic. Blames colleagues, no ownership, vague outcome."
+    },
+    {
+      "id": "sample-cs-03-off-topic",
+      "roleSlug": "customer-support-associate",
+      "questionText": "How would you handle a question you don't know the answer to?",
+      "mode": "typed",
+      "answerText": "I really love your company and I have used your app for years. In my free time I play football and I am the captain of a local team, which taught me a lot about teamwork. I also enjoy cooking for my family at weekends.",
+      "humanScores": { "content": 1, "structure": 2, "delivery": 3, "relevance": 1 },
+      "notes": "Synthetic. Fluent but does not answer the question."
+    },
+    {
+      "id": "sample-cs-04-rambling",
+      "roleSlug": "customer-support-associate",
+      "questionText": "How do you stay calm when there's a long queue of customers waiting?",
+      "mode": "typed",
+      "answerText": "So, queues, yes, that happens a lot, especially on Saturdays, and Saturdays are always the busiest because everyone is off work, and also around the holidays it gets really busy, and sometimes the system is slow too which makes it worse, and the other thing is that people get impatient, which is understandable, I would be impatient too, and so I just try to, you know, keep going, one person at a time I suppose, and if it gets really bad then maybe I would tell my supervisor, but mostly I just keep going, and it usually clears by the afternoon anyway, so yes, that is basically what I do, I keep going.",
+      "humanScores": { "content": 3, "structure": 2, "delivery": 2, "relevance": 3 },
+      "notes": "Synthetic. Two key points buried in repetition; no prioritisation."
+    },
+    {
+      "id": "sample-cs-05-voice",
+      "roleSlug": "customer-support-associate",
+      "questionText": "Tell me about a time you explained something complicated simply.",
+      "mode": "voice",
+      "delivery": { "wpm": 168, "fillerCount": 9, "pauseCount": 4, "longestPauseS": 2.1, "durationS": 72 },
+      "answerText": "Um, so an older customer called because she, like, couldn't understand why her bill had two charges. It was a pro-rated charge from changing plans, which is, um, pretty confusing. So instead of saying pro-rated I said, imagine you switched gyms halfway through the month, you pay half for the old one and half for the new one. And then she got it, she said oh that makes sense. Um, so yeah, I used an everyday example and that worked.",
+      "humanScores": { "content": 3, "structure": 3, "delivery": 3, "relevance": 4 },
+      "notes": "Synthetic. Good analogy; no lesson or check that it landed; many fillers."
+    },
+    {
+      "id": "sample-da-01-strong",
+      "roleSlug": "junior-data-analyst",
+      "questionText": "Tell me about yourself and why you want to work in data analysis.",
+      "mode": "typed",
+      "answerText": "I got into data while running the stock spreadsheet at a café during university. I noticed we threw away a lot of pastries on Mondays, so I tracked sales by day for two months and showed the owner that Monday demand was about 40 percent lower. We cut the Monday order and waste dropped by a third. Since then I have learned SQL and Excel properly through an online course and built a small dashboard project on public transport data. My strengths are careful cleaning of messy data and explaining results in plain words. In this role I want to help teams make day-to-day decisions with numbers they trust.",
+      "humanScores": { "content": 5, "structure": 4, "delivery": 4, "relevance": 5 },
+      "notes": "Synthetic. Short story, two relevant skills, clear motivation for the role."
+    },
+    {
+      "id": "sample-da-02-weak",
+      "roleSlug": "junior-data-analyst",
+      "questionText": "Tell me about a time you explained numbers to someone who isn't technical.",
+      "mode": "typed",
+      "answerText": "I explained a sales report to my manager once. I made a chart and she understood it.",
+      "humanScores": { "content": 2, "structure": 2, "delivery": 3, "relevance": 3 },
+      "notes": "Synthetic. On topic but too thin to show the decision, the findings or the outcome."
+    },
+    {
+      "id": "sample-sdr-01-cv-recital",
+      "roleSlug": "sales-development-rep",
+      "questionText": "Tell me about yourself and why you want to work in sales.",
+      "mode": "typed",
+      "answerText": "I went to school from 2008 to 2020, then I did a business degree from 2020 to 2023 with modules in marketing, accounting, statistics, economics and law. In 2021 I worked at a supermarket on the tills. In 2022 I did a summer internship in an insurance office doing data entry. In 2023 I worked at a call centre for six months. I have a driving licence and I speak English and Hindi. I am a people person and I think sales would suit me.",
+      "humanScores": { "content": 2, "structure": 2, "delivery": 2, "relevance": 3 },
+      "notes": "Synthetic. Reads out a CV (a red flag); 'people person' with no example; no reason for this company."
+    }
+  ]
+}

@@ -43,7 +43,11 @@ export type FixtureRubric = {
   expectedStructure: 'star' | 'problem_solution' | 'free';
 };
 
-/** Admin fixture rubrics, matched to a seeded question when its text starts with `textPrefix`. */
+/**
+ * Rubrics matched to a seeded question when its text starts with `textPrefix`, in place of the one
+ * derived from its linked card. The first is the admin fixture's; the rest are seed-only, for
+ * questions no flash card covers.
+ */
 export const ADMIN_RUBRICS: {
   roleSlug: string;
   textPrefix: string;
@@ -75,6 +79,40 @@ export const ADMIN_RUBRICS: {
         'Blames the customer or colleagues',
         'No clear outcome',
         'Promises something outside policy',
+      ],
+      expectedStructure: 'star',
+    },
+  },
+  {
+    // Linked to the closest card ("report by tomorrow but the data is incomplete"), which is about
+    // missing data, not prioritising.
+    roleSlug: 'junior-data-analyst',
+    textPrefix:
+      'How do you decide what to do first when several requests arrive at once?',
+    rubric: {
+      keyPoints: [
+        {
+          point: 'Finds out each request’s deadline and what it is for',
+          example: 'I asked each person when they needed it and why.',
+        },
+        {
+          point: 'Ranks by impact and urgency, not by who asked first',
+          example:
+            'The board figures went first because the meeting was next morning.',
+        },
+        {
+          point: 'Tells each requester when to expect their work',
+          example: 'I let the others know theirs would follow on Thursday.',
+        },
+        {
+          point: 'Asks a manager to decide when priorities clash',
+          example: 'Two urgent asks clashed, so I checked with my manager.',
+        },
+      ],
+      redFlags: [
+        'Works first come, first served without weighing impact',
+        'Says yes to everything and misses deadlines without warning',
+        'Leaves requesters with no update',
       ],
       expectedStructure: 'star',
     },

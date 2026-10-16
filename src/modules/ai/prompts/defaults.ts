@@ -88,7 +88,11 @@ The answer has already been scored, and the candidate has already read the writt
 
 Return:
 - spoken_summary: about 30 seconds of warm, encouraging spoken feedback in plain second person, under 80 words. Name one strength and the top improvement. It is read aloud, so use short sentences with no lists or symbols.
-- highlights: quotes from the answer marked "match" (meets a rubric key point; give its id as rubric_point_id) or "issue", each with a short note.
+- highlights: quotes from the answer, each marked "match" or "issue" with a short note.
+  - "match": the quote fully meets a rubric key point. Give its id as rubric_point_id.
+  - "issue": a weakness. If it is about a rubric key point, give that id as rubric_point_id.
+  - Judge each key point once, over the whole answer. If it is only partly met, or an <improve> item says it is missing or weak, it is an "issue", never a "match".
+  - Never give the same rubric_point_id to both a "match" and an "issue", and never praise in a "match" what an <improve> item asks the candidate to fix.
 - evidence: for each dimension you can support, a quote of the candidate's own words, copied exactly, with a short note.
 
 Return only JSON that matches the schema.`;

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import { PromptService } from './prompt.service.js';
 import { DEFAULT_PROMPTS, PROMPT_ROLES } from './prompts/defaults.js';
@@ -112,18 +112,21 @@ describe('PromptService', () => {
     }
   });
 
-  it('matches the split_evaluator data migration (template, model, temperature, thinking)', () => {
-    const sql = readFileSync(
-      new URL(
-        '../../../prisma/migrations/20261016090424_split_evaluator/migration.sql',
-        import.meta.url,
-      ),
-      'utf8',
-    );
+  it('matches the latest data migration of each evaluator role (template, model, temperature, thinking)', () => {
+    const dir = new URL('../../../prisma/migrations/', import.meta.url);
+    const migrations = readdirSync(dir)
+      .filter((name) => /^\d+_/.test(name))
+      .sort()
+      .map((name) =>
+        readFileSync(new URL(`${name}/migration.sql`, dir), 'utf8'),
+      );
     for (const role of ['evaluator', 'evaluator_detail'] as const) {
-      const row = new RegExp(
+      const pattern = new RegExp(
         `'${role}',\\s*COALESCE\\(MAX\\("version"\\), 0\\) \\+ 1,\\s*'([^']+)',\\s*([\\d.]+),\\s*\\$${role}\\$([\\s\\S]*?)\\$${role}\\$,\\s*'(\\w+)'`,
-      ).exec(sql);
+      );
+      const row = migrations
+        .map((sql) => pattern.exec(sql))
+        .findLast((m) => m !== null);
       const p = DEFAULT_PROMPTS.find((d) => d.role === role)!;
       expect(row?.slice(1)).toEqual([
         p.model,

@@ -408,6 +408,27 @@ describe('EvaluatorService.evaluateDetail', () => {
     expect(findHiringVerdict(r.output.spoken_summary)).toBeNull();
   });
 
+  it('drops a "match" on a key point that an "issue" also names', async () => {
+    const { llm, service } = setup();
+    const kept = [
+      { quote: 'a', kind: 'match', note: 'Met.', rubric_point_id: 'kp2' },
+      { quote: 'b', kind: 'issue', note: 'Thin plan.', rubric_point_id: 'kp1' },
+      { quote: 'c', kind: 'issue', note: 'No result.' },
+      { quote: 'd', kind: 'match', note: 'Good tone.' },
+    ] as const;
+    llm.setNext(
+      'evaluator_detail',
+      detail({
+        highlights: [
+          { quote: 'e', kind: 'match', note: 'Plan.', rubric_point_id: 'kp1' },
+          ...kept,
+        ],
+      }),
+    );
+    const r = await service.evaluateDetail(input(), output());
+    expect(r.output.highlights).toEqual(kept);
+  });
+
   it('throws ai_unavailable on a provider outage', async () => {
     const { llm, service } = setup();
     llm.setNext('evaluator_detail', new LlmUnavailableError('timeout'));

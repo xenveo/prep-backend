@@ -1,0 +1,2 @@
+# Run artefacts from scripts/calibrate.ts. Record results in the prompt version notes instead.
+*.results-*.json
