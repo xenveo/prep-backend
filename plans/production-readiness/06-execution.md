@@ -66,12 +66,12 @@ Update this table as tasks land: status, evidence, and any deviations.
 | MAIL | backend Coder | done 2026-10-16 | Resend adapter (`resend` 6.18.1), permanent vs retryable mapping, idempotency key = unique email job id, allowlist routes the rest to the outbox. Live: a real invite was delivered to the allowlisted inbox via Resend; a non-allowlisted login code was suppressed to the outbox |
 | Model choice | user | done 2026-10-16: `gemini-3.8-flash` (assessment, generation, transcription) + `gemini-3.8-flash-tts` (interviewer voice); no Live model; interview flow stays record-then-upload | |
 | D2, D6, D7 (pause source, feedback latency, dev allowlist) | user | done 2026-10-16: browser pause meter; split evaluator; allowlist kartik.pavan@atrox.io | |
-| G-LLM | backend Coder | pending | |
-| G-STT | backend Coder | pending | |
-| G-TTS | backend Coder | pending | |
-| G-EVAL (split evaluator) | backend Coder | pending | |
-| Candidate pause meter | candidate agent | pending | |
-| P3 acceptance | Coordinator + UI agents | pending | |
+| G-LLM | backend Coder | done 2026-10-16 (`d8a0cb1`) | Shared GeminiClient + gemini-3.8-flash LLM adapter; migration `gemini_flash` (thinking levels, attempts.speaking_s); live call about 2.5 s |
+| G-STT | backend Coder | done 2026-10-16 (`253da57`) | Chrome webm/opus accepted as-is (0% WER on a corpus clip); live voice transcription 3.4–4.1 s for 13–22 s answers |
+| G-TTS | backend Coder | done 2026-10-16 (`253da57`) | gemini-3.8-flash-tts WAV 24 kHz; voices en-in-podcaster-7 / charon / en-in-tutor-11; first generation 3.3–3.9 s, cached 3–11 ms |
+| G-EVAL (split evaluator) | backend Coder | done 2026-10-16 (`253da57`) | Written feedback (server) typed 4.3–4.7 s, voice 8.2–9.2 s; spoken feedback ready 18–23 s; completion (summariser) 7–10.4 s |
+| Candidate pause meter | candidate agent | done 2026-10-16 (uncommitted) | AudioWorklet meter; matched corpus truth within 0.1 s (a2, a4, L1); values flow into wpm and pauses |
+| P3 acceptance | Coordinator + UI agents | partly done 2026-10-16 | Real-Gemini browser run passed (voice retry/skip, typed, card and question audio, completion, admin review, AI config, voice samples). Follow-ups: candidate UI waits on polling (WS wake fix in progress); TTS WAV is about 48 KB/s (opus/mp3 needs an encoder decision); an evaluator matched/issue contradiction (logged for OPS-CAL); abandoned sessions consume session numbers (product question, with PD4). Still to do: real human voices and noise, cost per real session |
 | P4-COST / P4-CONTENT / P4-DATA | backend Coders | pending | |
 | F1–F3, PD2–PD3 (admin) | admin agent | pending | |
 | B1–B2, PD3–PD4 (candidate) | candidate agent | pending | |
