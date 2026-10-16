@@ -34,8 +34,9 @@ const SAFETY = `Safety rules:
 
 /**
  * Call 1 of the split evaluator (01-gemini decision 2a): scores and the written feedback panel only,
- * so written feedback is fast. Variables: role_title, question, key_points, red_flags,
- * expected_structure, answer_mode, attempt_no.
+ * so written feedback is fast. Variables: role_title, question, key_points, red_flags, answer_mode,
+ * attempt_no. No expected structure (user decision 2026-10-16): structure is judged on how easy the
+ * answer is to follow, in any format, and feedback never asks for a named method such as STAR.
  */
 const EVALUATOR = `You are a supportive interview coach scoring one practice answer for the role "{{role_title}}".
 
@@ -47,7 +48,6 @@ Rubric key points (ids in brackets):
 Red flags:
 {{red_flags}}
 
-Expected structure: {{expected_structure}}
 Answer mode: {{answer_mode}}. This is attempt {{attempt_no}} of 2.
 
 ${SAFETY}
@@ -64,12 +64,12 @@ Score each dimension from 1 to 5. The levels in general:
 
 What each level means per dimension:
 - content: 1 nothing relevant; 2 only generic statements that could answer any question; 3 at least one relevant point or example, even if other key points are missing; 4 several key points with specific detail; 5 the key points, with specific, real detail.
-- structure: 1 no order, or too short to have one; 2 some order, but hard to follow; 3 a listener can follow it, even if parts of the expected structure are missing or brief; 4 clear and follows the expected structure; 5 every part of the expected structure, well linked.
+- structure: 1 no order, or too short to have one; 2 some order, but hard to follow; 3 a listener can follow it; 4 clear and logical: the listener knows the situation, what the candidate did and how it ended; 5 clear, logical and well linked from start to finish. Any format is fine, including a single paragraph: judge how easy the answer is to follow, never whether it uses a named method.
 - delivery: 1 hard to understand; 2 often unclear or hesitant; 3 understandable throughout; 4 clear and confident; 5 clear, confident and easy to listen to.
 - relevance: 1 off-topic; 2 touches the topic but mostly misses the question; 3 answers the question asked; 4 answers it directly and stays on it; 5 answers it directly and fully throughout.
 
 Rules:
-- A 3 does not need every rubric key point or every part of the expected structure.
+- A 3 does not need every rubric key point.
 - When an on-topic answer sits between two levels, give the higher one. An on-topic attempt, however thin, scores at least 2 on content, structure and relevance.
 - Keep low scores honest: an off-topic, empty or very short answer (a sentence or two with no relevant point) scores 1 or 2 on content, structure and relevance, however fluent or polite it is.
 - Do not penalise accent, or non-native grammar and word choice that keep the meaning clear.
@@ -85,6 +85,7 @@ How to give feedback (plain, warm, second person, short sentences):
 - delivery_notes: one or two sentences on delivery.
 - follow_up: a short probing question only if the answer is too vague to score, otherwise null.
 - applied: on attempt 2 only, check each previous improvement point and mark it applied, partly or not_applied with a short piece of evidence from the new answer. Omit on attempt 1.
+- In every field: never name or ask for an answer framework or acronym (such as STAR), and never ask for a different format. Say which specific detail to add instead.
 
 Return only JSON that matches the schema.`;
 

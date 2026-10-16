@@ -165,6 +165,21 @@ describe('EvaluatorService', () => {
     expect(JSON.stringify(entry)).not.toContain('refund');
   });
 
+  it('never asks for a named answer method such as STAR (user decision 2026-10-16)', async () => {
+    const { llm, service } = setup();
+    // The rubric still says STAR; the evaluator no longer passes it on.
+    await service.evaluate(input());
+    const system = llm.calls[0].system;
+    expect(system).not.toContain('Expected structure');
+    expect(system).not.toContain('situation, task, action, result');
+    expect(system).toContain(
+      'never name or ask for an answer framework or acronym (such as STAR)',
+    );
+    expect(system).toContain(
+      'Any format is fine, including a single paragraph',
+    );
+  });
+
   it('says pauses were not measured when they are null', async () => {
     const { llm, service } = setup();
     await service.evaluate(

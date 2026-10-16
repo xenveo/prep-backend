@@ -87,12 +87,6 @@ export type EvaluateDetailResult = {
   moderation: Moderation;
 };
 
-const STRUCTURE_TEXT: Record<Rubric['expectedStructure'], string> = {
-  star: 'STAR (situation, task, action, result)',
-  problem_solution: 'problem, then solution, then outcome',
-  free: 'free form, but clear and logical',
-};
-
 const MODERATION_NOTE =
   '\n\nImportant: your previous feedback contained hiring-decision language. Coach only. Never say or imply whether the candidate would be hired, rejected or is a fit for the role.';
 
@@ -123,7 +117,6 @@ export class EvaluatorService {
       key_points: keyPointsText(input.rubric),
       red_flags:
         input.rubric.redFlags.map((r) => `- ${r}`).join('\n') || '- none',
-      expected_structure: STRUCTURE_TEXT[input.rubric.expectedStructure],
       answer_mode: input.mode,
       attempt_no: input.attemptNo,
     });
