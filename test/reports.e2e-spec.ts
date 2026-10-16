@@ -758,7 +758,8 @@ describe('Reports and admin read models (e2e)', () => {
           timesAsked: 4,
           avgFirst: 50,
           avgSecond: 55,
-          avgLearning: 38,
+          // a1 50, a2 skipped → 50 (no change), b1 100, d2 0
+          avgLearning: 50,
         },
       ]);
       expect(r.needsAttention).toEqual([
@@ -853,7 +854,7 @@ describe('Reports and admin read models (e2e)', () => {
       ]);
       expect(lines).toContain('Not ready yet,2,1,-1');
       expect(lines).toContain('Structure,40');
-      expect(lines).toContain(`${RUN} Handle an upset customer,4,50,55,38`);
+      expect(lines).toContain(`${RUN} Handle an upset customer,4,50,55,50`);
 
       const invited = await get(
         `/api/admin/reports/export.csv?roleId=${roleId}&dateBasis=invited`,

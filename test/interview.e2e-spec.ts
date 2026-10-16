@@ -1,5 +1,9 @@
+import { AppConfig } from '../src/config/app-config.js';
+import { EmailService } from '../src/jobs/email/email.service.js';
+import type { EmailJob } from '../src/jobs/email/templates/templates.js';
 import { bandFor } from '../src/modules/interview/scoring/score.js';
 import { DEFAULT_ROLE_SETTINGS } from '../src/modules/interview/types.js';
+import { SettingsService } from '../src/modules/settings/settings.service.js';
 import {
   cleanupUsers,
   createTestApp,
@@ -24,11 +28,16 @@ describe('Interview API (e2e)', () => {
   let otherCookie: string;
   let sessionId: string;
   let questionIds: string[] = [];
+  const sent: EmailJob[] = [];
   const slug = RUN;
   const otherSlug = `${RUN}-other`;
 
   beforeAll(async () => {
-    t = await createTestApp();
+    t = await createTestApp((b) =>
+      b.overrideProvider(EmailService).useValue({
+        send: async (job: EmailJob) => void sent.push(job),
+      }),
+    );
     const settings = {
       ...DEFAULT_ROLE_SETTINGS,
       questionsPerSession: 2,
@@ -384,8 +393,32 @@ describe('Interview API (e2e)', () => {
   });
 
   it('completes the session and returns the report', async () => {
-    const res = await post(`/sessions/${sessionId}/complete`).expect(200);
+    // Turn the session-complete email on just for this completion (SRS 7.4); restore it after.
+    const workspace = t.app.get(SettingsService);
+    const { before } = await workspace.update({ sessionCompleteEmail: true });
+    let res;
+    try {
+      res = await post(`/sessions/${sessionId}/complete`).expect(200);
+      await post(`/sessions/${sessionId}/complete`).expect(200);
+    } finally {
+      await workspace.update({
+        sessionCompleteEmail: before.sessionCompleteEmail,
+      });
+    }
     const report = res.body;
+    const emails = sent.filter((m) => m.template === 'session-complete');
+    expect(emails).toEqual([
+      {
+        template: 'session-complete',
+        to: `${RUN}-cand@example.test`,
+        vars: {
+          name: 'Test User',
+          roleTitle: 'Interview Test Role',
+          score: report.score,
+          link: `${t.app.get(AppConfig).env.APP_CANDIDATE_ORIGIN}/roles/${slug}/results/${sessionId}`,
+        },
+      },
+    ]);
     expect(report).toMatchObject({
       id: sessionId,
       roleId: slug,
@@ -396,6 +429,14 @@ describe('Interview API (e2e)', () => {
     expect(report.results[0].second).not.toBeNull();
     expect(report.results[1].second).toBeNull();
     expect(report.results[1].applied).toEqual([]);
+    // Q2's skipped retry counts as no change: A2 = A1 and L = 50.
+    const retry = await t.prisma.attempt.findFirstOrThrow({
+      where: { sessionId, questionId: questionIds[0], attemptNo: 2 },
+    });
+    expect(report.retryAvg).toBe(
+      (retry.score! + report.results[1].first.feedback.score) / 2,
+    );
+    expect(report.learningAvg).toBe((retry.learningScore! + 50) / 2);
     expect(report.strengths.length).toBeGreaterThan(0);
     expect([1, 2]).toContain(report.strengths[0].cardId);
     expect(typeof report.bandMessage).toBe('string');

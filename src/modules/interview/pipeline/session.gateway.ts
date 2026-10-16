@@ -5,8 +5,8 @@ import {
   Inject,
   Injectable,
   Logger,
+  type BeforeApplicationShutdown,
   type OnApplicationBootstrap,
-  type OnApplicationShutdown,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
@@ -142,7 +142,7 @@ type Channel = {
  */
 @Injectable()
 export class SessionGateway
-  implements OnApplicationBootstrap, OnApplicationShutdown
+  implements OnApplicationBootstrap, BeforeApplicationShutdown
 {
   private readonly logger = new Logger(SessionGateway.name);
   private readonly channels = new Map<string, Channel>();
@@ -177,11 +177,19 @@ export class SessionGateway
     this.pingTimer.unref();
   }
 
-  async onApplicationShutdown(): Promise<void> {
+  /**
+   * Runs before Nest closes the HTTP server: open WebSockets keep `server.close()` from ever
+   * finishing, so they must be gone first or shutdown hangs while a candidate is in the room.
+   * Clients reconnect and refetch on any close.
+   */
+  async beforeApplicationShutdown(): Promise<void> {
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.httpServer?.off('upgrade', this.onUpgrade);
-    for (const set of this.byUser.values())
-      for (const c of set) c.ws.close(1001, 'Server shutting down');
+    const sockets = [...this.byUser.values()].flatMap((set) =>
+      [...set].map((c) => c.ws),
+    );
+    for (const ws of sockets) ws.close(1001, 'Server shutting down');
+    await closeOrTerminate(sockets, CLOSE_GRACE_MS);
     const unsubs = [...this.channels.values()].map((c) => c.unsubscribe);
     this.channels.clear();
     this.byUser.clear();
@@ -331,4 +339,29 @@ function reject(socket: Duplex, status: number): void {
     `HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ''}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
   );
   socket.destroy();
+}
+
+/** How long a socket gets to finish the close handshake on shutdown before it is cut. */
+const CLOSE_GRACE_MS = 1000;
+
+async function closeOrTerminate(
+  sockets: WebSocket[],
+  graceMs: number,
+): Promise<void> {
+  const open = sockets.filter((ws) => ws.readyState !== WebSocket.CLOSED);
+  if (open.length === 0) return;
+  await new Promise<void>((resolve) => {
+    let pending = open.length;
+    const timer = setTimeout(() => {
+      for (const ws of open) ws.terminate();
+      resolve();
+    }, graceMs);
+    for (const ws of open)
+      ws.once('close', () => {
+        if (--pending === 0) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+  });
 }

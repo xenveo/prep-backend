@@ -221,10 +221,8 @@ export class AttemptPipelineService implements OnModuleInit {
         transcript: stt.text,
       });
     }
-    const delivery = toDeliveryMetrics(
-      metrics,
-      (await this.settings.get()).deliveryTargets,
-    );
+    const { deliveryTargets } = await this.settings.get();
+    const delivery = toDeliveryMetrics(metrics, deliveryTargets);
 
     // 3. Evaluate: call 1, scores and written feedback.
     const attemptNo = attempt.attemptNo === 2 ? 2 : 1;
@@ -238,6 +236,7 @@ export class AttemptPipelineService implements OnModuleInit {
       transcript,
       mode: attempt.mode,
       delivery: metrics,
+      deliveryTargets,
       attemptNo,
       previousImprovementPoints,
       dimensionWeights: weights.dimensionWeights,

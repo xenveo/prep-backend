@@ -8,6 +8,7 @@
 import { Prisma } from '../../generated/prisma/client.js';
 import type { UserStatus } from '../../generated/prisma/client.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
+import { SKIPPED_RETRY_LEARNING } from '../interview/scoring/score.js';
 import type { DateBasis, QuestionAgg } from './report-rules.js';
 
 export type ReportScope = {
@@ -100,7 +101,9 @@ type QuestionSqlRow = {
 
 /**
  * Per-question averages over the sessions in scope. A skipped retry counts its first try as the
- * second (A2 = A1) and learning 0 (plan §6 "Scoring").
+ * second (A2 = A1) and learning SKIPPED_RETRY_LEARNING (plan §6 "Scoring"). There is no stored
+ * per-question learning for a skipped retry, so sessions completed before the 2026-10-16 rule change
+ * are averaged under the current rule too.
  */
 export async function questionAggregates(
   prisma: PrismaService,
@@ -111,7 +114,7 @@ export async function questionAggregates(
            COUNT(*)::int AS "times_asked",
            AVG(a1."score")::float8 AS "avg_first",
            AVG(COALESCE(a2."score", a1."score"))::float8 AS "avg_second",
-           AVG(CASE WHEN sq."retry_skipped" THEN 0 ELSE a2."learning_score" END)::float8 AS "avg_learning"
+           AVG(CASE WHEN sq."retry_skipped" THEN ${SKIPPED_RETRY_LEARNING}::int ELSE a2."learning_score" END)::float8 AS "avg_learning"
     FROM in_scope s
     JOIN "session_questions" sq ON sq."session_id" = s."id"
     JOIN "questions" q ON q."id" = sq."question_id"

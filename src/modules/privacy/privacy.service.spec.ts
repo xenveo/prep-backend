@@ -221,6 +221,60 @@ describe('PrivacyService', () => {
     expect(prisma.privacyRequest.count).toHaveBeenCalledWith({ where: filter });
   });
 
+  it('lists only the caller’s own pending or last-90-day requests, newest first', async () => {
+    const { service, prisma } = setup({});
+    const done = new Date('2026-10-15T09:00:00Z');
+    prisma.privacyRequest.findMany.mockResolvedValue([
+      {
+        ...request('deletion'),
+        id: 'p3',
+        status: 'pending',
+        createdAt: done,
+      },
+      {
+        ...request('export'),
+        id: 'p2',
+        status: 'completed',
+        completedAt: done,
+      },
+      { ...request('deletion'), id: 'p1', status: 'rejected' },
+    ]);
+    const rows = await service.listOwn('u1', new Date('2026-10-16T00:00:00Z'));
+    expect(prisma.privacyRequest.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'u1',
+        OR: [
+          { status: 'pending' },
+          { createdAt: { gte: new Date('2026-07-18T00:00:00Z') } },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    expect(rows).toEqual([
+      {
+        id: 'p3',
+        kind: 'deletion',
+        status: 'pending',
+        createdAt: done.toISOString(),
+        completedAt: null,
+      },
+      {
+        id: 'p2',
+        kind: 'export',
+        status: 'completed',
+        createdAt: CREATED.toISOString(),
+        completedAt: done.toISOString(),
+      },
+      {
+        id: 'p1',
+        kind: 'deletion',
+        status: 'completed',
+        createdAt: CREATED.toISOString(),
+        completedAt: null,
+      },
+    ]);
+  });
+
   it('pages with a cursor past the last row only when more rows exist', async () => {
     const rows = [0, 1, 2].map((n) => ({
       ...request('export'),

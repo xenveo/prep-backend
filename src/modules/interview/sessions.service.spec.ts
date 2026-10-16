@@ -1,5 +1,7 @@
 import type { AuthUser } from '../../common/auth/auth.types.js';
-import { AppError } from '../../common/errors/app-error.js';
+import { AppError, notFound } from '../../common/errors/app-error.js';
+import type { AppConfig } from '../../config/app-config.js';
+import type { EmailService } from '../../jobs/email/email.service.js';
 import type { ActivityService } from '../activity/activity.service.js';
 import { InterviewerService } from '../ai/interviewer.service.js';
 import type { PromptService } from '../ai/prompt.service.js';
@@ -7,7 +9,10 @@ import type { SummariserService } from '../ai/summariser.service.js';
 import type { ContentQueryService } from '../content/content-query.service.js';
 import type { TtsCacheService } from '../content/tts-cache.service.js';
 import type { PrismaService } from '../../prisma/prisma.service.js';
+import { DEFAULT_WORKSPACE_SETTINGS } from '../settings/settings.schema.js';
+import type { SettingsService } from '../settings/settings.service.js';
 import type { AssignmentsService } from '../users/assignments.service.js';
+import type { UsersService } from '../users/users.service.js';
 import {
   attempt,
   feedback,
@@ -93,6 +98,16 @@ function setup() {
   };
   const summariser = { summarise: vi.fn() };
   const activity = { record: vi.fn() };
+  const settings = {
+    get: vi.fn().mockResolvedValue(DEFAULT_WORKSPACE_SETTINGS),
+  };
+  const users = {
+    findCandidate: vi
+      .fn()
+      .mockResolvedValue({ id: USER_ID, email: user.email, name: user.name }),
+  };
+  const email = { send: vi.fn().mockResolvedValue(undefined) };
+  const config = { env: { APP_CANDIDATE_ORIGIN: 'https://app.test' } };
   const service = new SessionsService(
     prisma as unknown as PrismaService,
     assignments as unknown as AssignmentsService,
@@ -102,6 +117,10 @@ function setup() {
     new InterviewerService(),
     summariser as unknown as SummariserService,
     activity as unknown as ActivityService,
+    settings as unknown as SettingsService,
+    users as unknown as UsersService,
+    email as unknown as EmailService,
+    config as unknown as AppConfig,
   );
   return {
     service,
@@ -112,6 +131,9 @@ function setup() {
     tts,
     summariser,
     activity,
+    settings,
+    users,
+    email,
   };
 }
 
@@ -221,11 +243,42 @@ describe('SessionsService.start', () => {
   });
 });
 
+type Ctx = ReturnType<typeof setup>;
+
+/** One answered question (60, retry skipped: session score 58), ready to complete. `count` 0 = another request completed it first. */
+function completable(
+  ctx: Ctx,
+  opts: { count?: number; isPreview?: boolean } = {},
+): Ctx {
+  const inProgress = loadedSession(1, [attempt(1, 1, { score: 60 })], {}, [1]);
+  ctx.prisma.session.findFirst
+    .mockResolvedValueOnce(inProgress)
+    .mockImplementationOnce(async () => ({
+      ...inProgress,
+      ...ctx.prisma.session.updateMany.mock.calls[0][0].data,
+      isPreview: opts.isPreview ?? false,
+    }));
+  ctx.prisma.session.updateMany.mockResolvedValue({ count: opts.count ?? 1 });
+  ctx.summariser.summarise.mockResolvedValue({
+    strengths: [],
+    focusAreas: [],
+    source: 'llm',
+  });
+  return ctx;
+}
+
+function emailOn(ctx: Ctx) {
+  ctx.settings.get.mockResolvedValue({
+    ...DEFAULT_WORKSPACE_SETTINGS,
+    sessionCompleteEmail: true,
+  });
+}
+
 describe('SessionsService.complete', () => {
-  it('scores with the snapshot weights, counting a skipped retry as A2 = A1 and L = 0', async () => {
+  it('scores with the snapshot weights, counting a skipped retry as A2 = A1 and L = 50', async () => {
     const { service, prisma, summariser, activity } = setup();
     // Q1: 40 then 80 (applied 1 + partly 0.5 → learning 75). Q2: 60, retry skipped.
-    // A1 = 50, A2 = 70, L = 37.5 → 0.2·50 + 0.55·70 + 0.25·37.5 = 57.875 → 58 (developing).
+    // A1 = 50, A2 = 70, L = (75 + 50) / 2 = 62.5 → 0.2·50 + 0.55·70 + 0.25·62.5 = 64.125 → 64 (developing).
     const attempts = [
       attempt(1, 1, { score: 40 }),
       attempt(1, 2, {
@@ -260,8 +313,8 @@ describe('SessionsService.complete', () => {
       status: 'completed',
       firstTryAvg: 50,
       retryAvg: 70,
-      learningAvg: 37.5,
-      score: 58,
+      learningAvg: 62.5,
+      score: 64,
       band: 'developing',
       bandMessage: 'Review flash cards and retake',
       skills: { content: 60, structure: 60, delivery: 60, relevance: 60 },
@@ -275,15 +328,89 @@ describe('SessionsService.complete', () => {
     });
     expect(report).toMatchObject({
       roleId: 'store-manager',
-      score: 58,
+      score: 64,
       band: 'developing',
     });
     expect('results' in report && report.results[1].second).toBeNull();
     expect(activity.record).toHaveBeenCalledWith(
       USER_ID,
-      'Completed session 1 · 58 Developing (baseline)',
+      'Completed session 1 · 64 Developing (baseline)',
       expect.any(Date),
     );
+  });
+
+  it('does not email results while the workspace setting is off', async () => {
+    const { service, email, users } = completable(setup());
+    await service.complete(USER_ID, SESSION_ID);
+    expect(users.findCandidate).not.toHaveBeenCalled();
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
+  it('emails the candidate a results link once when the setting is on', async () => {
+    const ctx = completable(setup());
+    emailOn(ctx);
+    await ctx.service.complete(USER_ID, SESSION_ID);
+    expect(ctx.users.findCandidate).toHaveBeenCalledWith(USER_ID);
+    expect(ctx.email.send).toHaveBeenCalledTimes(1);
+    expect(ctx.email.send).toHaveBeenCalledWith({
+      template: 'session-complete',
+      to: 'c@example.test',
+      vars: {
+        name: 'Asha Rao',
+        roleTitle: 'Store Manager',
+        score: 58,
+        link: `https://app.test/roles/store-manager/results/${SESSION_ID}`,
+      },
+    });
+  });
+
+  it('a retried complete that lost the race (or found it done) sends nothing', async () => {
+    const raced = completable(setup(), { count: 0 });
+    emailOn(raced);
+    await raced.service.complete(USER_ID, SESSION_ID);
+    expect(raced.email.send).not.toHaveBeenCalled();
+
+    const done = setup();
+    emailOn(done);
+    done.prisma.session.findFirst.mockResolvedValue(
+      loadedSession(
+        1,
+        [attempt(1, 1)],
+        {
+          status: 'completed',
+          completedAt: new Date(),
+          score: 70,
+          band: 'nearly_ready',
+        },
+        [1],
+      ),
+    );
+    await done.service.complete(USER_ID, SESSION_ID);
+    expect(done.email.send).not.toHaveBeenCalled();
+  });
+
+  it('never emails for a preview session', async () => {
+    const ctx = completable(setup(), { isPreview: true });
+    emailOn(ctx);
+    await ctx.service.complete(USER_ID, SESSION_ID);
+    expect(ctx.email.send).not.toHaveBeenCalled();
+  });
+
+  it('completes even when the candidate is gone or enqueueing fails', async () => {
+    const gone = completable(setup());
+    emailOn(gone);
+    gone.users.findCandidate.mockRejectedValue(notFound('Candidate not found'));
+    await expect(
+      gone.service.complete(USER_ID, SESSION_ID),
+    ).resolves.toMatchObject({ score: 58 });
+    expect(gone.email.send).not.toHaveBeenCalled();
+
+    const failing = completable(setup());
+    emailOn(failing);
+    failing.email.send.mockRejectedValue(new Error('redis down'));
+    await expect(
+      failing.service.complete(USER_ID, SESSION_ID),
+    ).resolves.toMatchObject({ score: 58 });
   });
 
   it('409 when a question is not done', async () => {

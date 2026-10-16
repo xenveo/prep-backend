@@ -11,6 +11,10 @@ import {
   learningScore,
 } from '../interview/scoring/score.js';
 import {
+  DEFAULT_DELIVERY_TARGETS,
+  type DeliveryTargets,
+} from '../interview/scoring/delivery.js';
+import {
   DIMENSIONS,
   type DeliveryMetric,
   type Dimension,
@@ -49,6 +53,8 @@ export type EvaluateInput = {
   mode: 'voice' | 'typed';
   /** Voice metrics; null/undefined for typed answers. */
   delivery?: VoiceMetrics | null;
+  /** The configured delivery targets (workspace settings), sent with voice metrics. Defaults when absent. */
+  deliveryTargets?: DeliveryTargets;
   attemptNo: 1 | 2;
   /** Attempt 1's improvement_points; required for attempt 2. */
   previousImprovementPoints?: string[];
@@ -243,7 +249,8 @@ export function buildEvaluatorUserMessage(
         ? 'pauses not measured'
         : `${d.pauseCount} pauses over one second, longest pause ${d.longestPauseS} s`;
     parts.push(
-      `Delivery measured from the audio: pace ${d.wpm} wpm, ${d.fillerCount} filler words, ${pauses}, duration ${d.durationS} s.`,
+      `Delivery measured from the audio: pace ${d.wpm} wpm, ${d.fillerCount} filler words, ${pauses}, duration ${d.durationS} s.\n` +
+        deliveryTargetsLine(input.deliveryTargets ?? DEFAULT_DELIVERY_TARGETS),
     );
   } else {
     parts.push(
@@ -263,6 +270,14 @@ export function buildEvaluatorUserMessage(
       wrapCandidateText(input.transcript),
   );
   return parts.join('\n\n');
+}
+
+/**
+ * "Targets: pace 120–160 wpm, fillers ≤ 4, pauses over one second ≤ 6." Fillers and pauses give only
+ * their upper bound: fewer never lowers delivery.
+ */
+function deliveryTargetsLine(t: DeliveryTargets): string {
+  return `Targets: pace ${t.pace.min}–${t.pace.max} wpm, fillers ≤ ${t.fillers.max}, pauses over one second ≤ ${t.pauses.max}.`;
 }
 
 /** Call 2's user message: call 1's scores and written feedback, then the delimited answer. */

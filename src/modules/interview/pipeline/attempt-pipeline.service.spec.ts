@@ -213,6 +213,7 @@ function setup(opts: { sessionStatus?: string } = {}) {
     storage,
     llm,
     log,
+    settings,
     tts,
     addVoice,
     addTyped,
@@ -233,6 +234,26 @@ describe('AttemptPipelineService', () => {
       expect.any(Function),
       { concurrency: 10 },
     );
+  });
+
+  it('voice: sends the configured delivery targets to the evaluator', async () => {
+    const t = setup();
+    t.settings.get.mockResolvedValue({
+      deliveryTargets: {
+        pace: { min: 110, max: 150, scaleMin: 80, scaleMax: 200 },
+        fillers: { min: 0, max: 3, scaleMin: 0, scaleMax: 12 },
+        pauses: { min: 2, max: 5, scaleMin: 0, scaleMax: 8 },
+      },
+    });
+    t.addVoice();
+    await t.service.processAttempt('att-1');
+
+    const call = t.llm.calls.find((c) => c.tag === 'evaluator')!;
+    expect(call.messages[0].content).toContain(
+      'Targets: pace 110–150 wpm, fillers ≤ 3, pauses over one second ≤ 5.',
+    );
+    const feedback = t.attempts.get('att-1')!.feedback as StoredFeedback;
+    expect(feedback.delivery[0].targetText).toBe('Target 110–150');
   });
 
   it('voice: transcribes, saves metrics, evaluates, pushes in order, then speaks', async () => {

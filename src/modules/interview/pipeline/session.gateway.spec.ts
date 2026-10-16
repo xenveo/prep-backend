@@ -193,7 +193,7 @@ describe('SessionGateway', () => {
   });
 
   afterEach(async () => {
-    await gateway.onApplicationShutdown();
+    await gateway.beforeApplicationShutdown();
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
   });
@@ -290,5 +290,18 @@ describe('SessionGateway', () => {
     const closed = new Promise<number>((r) => a.ws.once('close', r));
     await bus.publish(USER_REVOKED_CHANNEL, { userId: 'u1' });
     await expect(closed).resolves.toBe(CLOSE_REVOKED);
+  });
+
+  it('closes open sockets before the HTTP server shuts down, so server.close() can finish', async () => {
+    const a = connect(`/ws/sessions/${SESSION_ID}`);
+    await opened(a.ws);
+    const closed = new Promise<number>((r) => a.ws.once('close', r));
+    await gateway.beforeApplicationShutdown();
+    await expect(closed).resolves.toBe(1001);
+    // No closeAllConnections(): a lingering upgraded socket would keep this from resolving.
+    await new Promise<void>((resolve, reject) =>
+      server.close((err) => (err ? reject(err) : resolve())),
+    );
+    server.listen(0); // afterEach closes it again
   });
 });

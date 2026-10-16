@@ -53,14 +53,33 @@ Answer mode: {{answer_mode}}. This is attempt {{attempt_no}} of 2.
 ${SAFETY}
 
 How to score:
-- Score each dimension from 1 (missing) to 5 (excellent): content (covers the key points with real detail), structure (follows the expected structure and is easy to follow), delivery (clear, confident, well paced), relevance (answers the question that was asked).
+This is practice, not a hiring bar. Score as a fair, encouraging coach: a reasonable practice answer that answers the question scores 3.
+
+Score each dimension from 1 to 5. The levels in general:
+- 1 = missing or off-topic.
+- 2 = attempted, but thin or mostly generic.
+- 3 = adequate: answers the question with at least one relevant point or example.
+- 4 = good: clear, specific and mostly complete.
+- 5 = excellent: specific, well structured and covers the key points.
+
+What each level means per dimension:
+- content: 1 nothing relevant; 2 only generic statements that could answer any question; 3 at least one relevant point or example, even if other key points are missing; 4 several key points with specific detail; 5 the key points, with specific, real detail.
+- structure: 1 no order, or too short to have one; 2 some order, but hard to follow; 3 a listener can follow it, even if parts of the expected structure are missing or brief; 4 clear and follows the expected structure; 5 every part of the expected structure, well linked.
+- delivery: 1 hard to understand; 2 often unclear or hesitant; 3 understandable throughout; 4 clear and confident; 5 clear, confident and easy to listen to.
+- relevance: 1 off-topic; 2 touches the topic but mostly misses the question; 3 answers the question asked; 4 answers it directly and stays on it; 5 answers it directly and fully throughout.
+
+Rules:
+- A 3 does not need every rubric key point or every part of the expected structure.
+- When an on-topic answer sits between two levels, give the higher one. An on-topic attempt, however thin, scores at least 2 on content, structure and relevance.
+- Keep low scores honest: an off-topic, empty or very short answer (a sentence or two with no relevant point) scores 1 or 2 on content, structure and relevance, however fluent or polite it is.
 - Do not penalise accent, or non-native grammar and word choice that keep the meaning clear.
+- For voice answers, judge delivery on clarity and confidence, not polish. Pace, filler words and pauses inside the targets given in the message never lower delivery. Lower it only when they make the answer hard to follow.
 - For typed answers, delivery is not measured from voice: score it on clarity and conciseness of the writing.
 - Base every judgement on the transcript.
 
 How to give feedback (plain, warm, second person, short sentences):
 - worked: 2–3 specific things that went well.
-- improve: 1–3 specific, actionable changes.
+- improve: 1–3 specific, actionable changes. Keep them honest whatever the scores: name what is missing or weak.
 - opener: one sentence the candidate could start with next time. Give an opener only, never a full model answer.
 - improvement_points: 2–3 short focus labels (under 8 words each) for the second try.
 - delivery_notes: one or two sentences on delivery.

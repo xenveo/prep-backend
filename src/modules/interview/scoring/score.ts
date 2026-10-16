@@ -71,14 +71,20 @@ export type SessionScoreResult = {
   band: Band;
 };
 
+/**
+ * Learning credited to a question whose retry was skipped: "no change", the same as a retry that
+ * showed no improvement (user decision 2026-10-16, replacing SRS FR-RETRY-05's 0).
+ */
+export const SKIPPED_RETRY_LEARNING = 50;
+
 const mean = (xs: number[]) =>
   xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
 const oneDecimal = (n: number) => Math.round(n * 10) / 10;
 
 /**
  * Preparedness = w1·A1 + w2·A2 + wL·L (weights in percent), rounded.
- * A skipped retry counts A2 = A1 and L = 0. Averages are returned to one decimal; the score uses the
- * unrounded means.
+ * A skipped retry counts A2 = A1 and L = SKIPPED_RETRY_LEARNING. Averages are returned to one
+ * decimal; the score uses the unrounded means.
  */
 export function sessionScore(
   questions: SessionQuestionScores[],
@@ -89,7 +95,9 @@ export function sessionScore(
     questions.map((q) => (q.second === null ? q.first : q.second)),
   );
   const l = mean(
-    questions.map((q) => (q.second === null ? 0 : (q.learning ?? 0))),
+    questions.map((q) =>
+      q.second === null ? SKIPPED_RETRY_LEARNING : (q.learning ?? 0),
+    ),
   );
   const score = Math.round(
     (a1 * weights.firstTry + a2 * weights.secondTry + l * weights.learning) /

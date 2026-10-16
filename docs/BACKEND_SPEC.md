@@ -148,7 +148,7 @@ These endpoints replace the mocks in `prep-candidate-ui/lib/api.ts` and the loca
 | Interview | `POST /sessions/:id/questions/:questionId/attempts` | multipart: `attemptNo` 1\|2, `mode`, `audio` (webm/ogg/mp4, ≤ 5 min) **or** `text` (≤ 1500 chars), `durationSec`, header `Idempotency-Key` | `202 {attemptId}`. The pipeline then runs: STT, metrics, evaluation, TTS. A second POST with the same key returns the same attempt, which makes the UI's retry safe. Attempt 2 must have attempt 1 done; one retry per question in R1 (FR-RETRY-04) |
 | Interview | `GET /attempts/:attemptId` | — | Polling fallback for the WebSocket. Returns `{status: "transcribing" \| "evaluating" \| "done" \| "failed", attempt?: Attempt, applied?: AppliedItem[], followUp?: string}` |
 | Interview | `WS /ws/sessions/:id` | client sends `audio.chunk` frames (optional live STT) | server sends `transcript.partial`, `attempt.transcribed`, `attempt.evaluated` (the full `Attempt`, plus `applied[]` on attempt 2), `feedback.audio_ready {url}`, `attempt.failed {retryable, textModeOffered}` |
-| Interview | `POST /sessions/:id/questions/:questionId/skip-retry` | — | `204`. Records `second: null`, which gives a learning score of 0 (FR-RETRY-05) |
+| Interview | `POST /sessions/:id/questions/:questionId/skip-retry` | — | `204`. Records `second: null`. The question then counts as no change: A2 = A1 and a learning score of 50 (user decision 2026-10-16, replacing FR-RETRY-05's 0) |
 | Interview | `POST /sessions/:id/complete` | — | Allowed once every question has attempt 1 and either attempt 2 or a skipped retry. Runs the summariser and returns the `Session` report |
 | Interview | `POST /sessions/:id/abandon` | — | Optional. "Save and exit" needs no call, because state is saved after every attempt |
 | Results | `GET /sessions/:id` (completed) | — | `Session`: `{id, roleId, number, startedAt, completedAt, score, band, skills, strengths: ReportPoint[], focus: ReportPoint[], results: QuestionResult[], bandMessage}` |
@@ -248,7 +248,7 @@ Each attempt runs as one background job: STT, then delivery metrics, then the LL
 
 1. The answer arrives at the API. Audio goes to object storage under `audio/{sessionId}/{attemptId}.webm`, with a 30-day lifecycle rule. Typed text is stored as-is.
 2. STT (batch in R1, with word timestamps) returns the transcript and words. Live transcription over the WebSocket is a Should (FR-INT-05). The design frames show it, but the current code does not.
-3. The metrics step runs in code, not the LLM. It produces `wpm`, `filler_count`, `pause_count` (gaps over 1.0 s) and `duration_s`. Each becomes a `DeliveryMetric`: `{key, label, value, valueText, scale, target, targetText, note, inTarget}`. Targets come from config: pace 120–160 wpm, fillers 0–4, pauses 3–6. Typed answers have no voice metrics, so `delivery: []` and the UI hides that block.
+3. The metrics step runs in code, not the LLM. It produces `wpm`, `filler_count`, `pause_count` (gaps over 1.0 s) and `duration_s`. Each becomes a `DeliveryMetric`: `{key, label, value, valueText, scale, target, targetText, note, inTarget}`. Targets come from config: pace 120–160 wpm, fillers 0–4, pauses 3–6. The evaluator's user message carries the configured targets next to the measured metrics ("Targets: pace 120–160 wpm, fillers ≤ 4, pauses over one second ≤ 6."), and the prompt refers to them instead of fixed numbers (user decision 2026-10-16, evaluator prompt v5). Typed answers have no voice metrics, so `delivery: []` and the UI hides that block; their evaluator message has no targets line.
 4. The evaluator LLM runs at low temperature with JSON-schema output. It returns scores, evidence and feedback (schema below). Invalid JSON is retried once; a second failure marks the attempt `failed` with `ai_unavailable` (FR-INT-09).
 5. The attempt is saved and `attempt.evaluated` is pushed. TTS renders the spoken summary (about 30 s), and the audio is cached by content hash.
 6. The interviewer prompt produces the retry prompt or the transition to the next question. Question audio is cached per question (SRS 7.3).
@@ -277,7 +277,7 @@ Notes on the schema:
 
 - Each dimension maps from 1–5 to 0, 25, 50, 75 or 100. These map to the UI's `subScores`.
 - Attempt score = 0.45·Content + 0.20·Structure + 0.20·Delivery + 0.15·Relevance.
-- Learning score per question = (applied = 1, partly = 0.5, not applied = 0) ÷ number of points × 100. A skipped retry scores L = 0, and its A2 is set to A1, so there is no improvement.
+- Learning score per question = (applied = 1, partly = 0.5, not applied = 0) ÷ number of points × 100. A skipped retry counts as "no change": its A2 is set to A1 and its L to 50, the same as a retry that showed no improvement. This is a user decision of 2026-10-16 that replaces SRS FR-RETRY-05 ("learning score 0"). Scores are stored at completion, so sessions completed earlier keep their L = 0 scores; the per-question report and question-bank averages (`avgLearning`) are computed from attempts and apply L = 50 to every skipped retry, older ones included.
 - Session preparedness:
 
 ```latex
@@ -330,6 +330,7 @@ The biggest conflict is the session score. The candidate UI averages each questi
 | Topic | Candidate UI | Admin UI | SRS | Spec decision |
 | --- | --- | --- | --- | --- |
 | Session score | Mean of best tries, computed client-side | 20/55/25 formula | 20/55/25 formula (5.3) | Server computes the SRS formula |
+| Skipped retry | "Second try skipped" | "retry skipped"; no per-question learning shown | Learning score 0 (FR-RETRY-05) | User decision 2026-10-16: "no change", A2 = A1 and L = 50. Applies to sessions completed from that date; stored scores are not recomputed |
 | Strengths / focus | Top and bottom 3 questions by score | — | Session summariser (7.2) | LLM summariser, each item linked to a `cardId` |
 | Delivery metrics | pace, fillers, pauses (design shows Length) | wpm, fillerWords, longestPauseSec | wpm, filler count, answer length (FR-FB-04) | Compute all five: wpm, filler\_count, pause\_count, longest\_pause\_s, duration\_s. Each client shows its own subset |
 | Applied-from-feedback values | `applied \| partly \| not-yet` | `done \| partial \| missed` | applied, partly, not applied (5.2) | Canonical `applied \| partly \| not_applied` |

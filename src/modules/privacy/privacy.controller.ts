@@ -2,7 +2,10 @@ import { Controller, Get, HttpCode, Post } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth/auth.types.js';
 import { CurrentUser } from '../../common/auth/current-user.decorator.js';
 import { Roles } from '../../common/auth/roles.decorator.js';
-import { PrivacyService } from './privacy.service.js';
+import {
+  type OwnPrivacyRequestView,
+  PrivacyService,
+} from './privacy.service.js';
 
 /** Candidate privacy rights (NFR-06): export my data, ask for deletion. */
 @Controller('me')
@@ -15,6 +18,14 @@ export class PrivacyController {
   @HttpCode(202)
   export(@CurrentUser() user: AuthUser): Promise<{ requestId: string }> {
     return this.service.requestExport(user.id);
+  }
+
+  /** The caller's own requests: pending ones and those from the last 90 days, newest first. */
+  @Get('privacy-requests')
+  listRequests(
+    @CurrentUser() user: AuthUser,
+  ): Promise<OwnPrivacyRequestView[]> {
+    return this.service.listOwn(user.id);
   }
 
   @Post('deletion-request')
