@@ -1,75 +1,34 @@
-// Dev seed from the UIs' mock data (plan M0: "seed loads 3 roles"). Idempotent: rows are upserted on
-// slug, email and position, so it can be re-run. Run with `npx prisma db seed`.
-// Sessions and attempts are not seeded.
+// Dev seed: the admin users, the ServiceNow job roles with their default flash cards and interview
+// questions, and the system rows. Idempotent: users are upserted on email, roles created once by
+// slug, and content added only to a role with no flash cards yet (an admin may have edited or
+// approved them since), so it can be re-run. Run with `npx prisma db seed`.
+// Roles stay draft for an admin to review and approve. Candidates, sessions and attempts are not
+// seeded.
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient, type Prisma } from '../src/generated/prisma/client.js';
 import {
-  PrismaClient,
-  type CardCategory,
-  type Prisma,
-} from '../src/generated/prisma/client.js';
+  flashCardInputSchema,
+  rubricInputSchema,
+} from '../src/modules/content/content.schemas.js';
 import { workspaceSettingsSchema } from '../src/modules/settings/settings.schema.js';
 import {
-  ADMIN_ROLES,
-  ADMIN_RUBRICS,
   ADMIN_USERS,
   ADMIN_WORKSPACE_SETTINGS,
   DEFAULT_ROLE_SETTINGS,
-  type FixtureRubric,
 } from './seed-data/admin-ui.js';
 import {
-  UI_CARDS,
-  UI_QUESTIONS,
-  UI_ROLES,
-  type UiCard,
-} from './seed-data/candidate-ui.js';
+  BEHAVIOURAL_CARDS,
+  FUNDAMENTALS_CARDS,
+  ROLE_CARDS,
+  type SeedCard,
+} from './seed-data/flash-cards.js';
+import { SEED_ROLES } from './seed-data/roles.js';
 import {
   ensurePromptVersions,
   ensureWorkspaceSettings,
   syncSystemSavedFilters,
 } from './system-seed.js';
-
-const TIP_MAX = 90;
-
-/**
- * Candidate UI card labels → CardCategory. The UI also uses Technical, Communication and Closing,
- * which the four-value enum (spec "Data model") doesn't have.
- */
-const CATEGORY: Record<string, CardCategory> = {
-  Behavioural: 'behavioural',
-  Situational: 'situational',
-  'Role knowledge': 'role_knowledge',
-  Motivation: 'motivation',
-  Technical: 'role_knowledge',
-  Communication: 'role_knowledge',
-  Closing: 'motivation',
-};
-
-/** Hand-shortened tips for the two candidate UI tips over the 90-character limit. */
-const SHORT_TIPS: Record<string, string> = {
-  'Say the feeling out loud: "I can see why that was frustrating." It lowers the temperature fast.':
-    'Name the feeling: "I can see why that was frustrating." It lowers the temperature fast.',
-  'Real examples beat general claims. Use one from your own experience, even if it was informal.':
-    'Real examples beat general claims. Use one from your own life, even an informal one.',
-};
-
-const DEMO_CANDIDATES = [
-  { email: 'demo.candidate@example.com', name: 'Demo Candidate' },
-  { email: 'demo.candidate2@example.com', name: 'Demo Candidate Two' },
-];
-
-function category(label: string): CardCategory {
-  const value = CATEGORY[label];
-  if (!value) throw new Error(`Unknown card category label "${label}"`);
-  return value;
-}
-
-function tip(text: string): string {
-  const short = SHORT_TIPS[text] ?? text;
-  return short.length <= TIP_MAX
-    ? short
-    : `${short.slice(0, TIP_MAX - 1).trimEnd()}…`;
-}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -82,19 +41,40 @@ function descriptionHtml(text: string, bullets: string[] = []): string {
   return `<p>${escapeHtml(text)}</p>${list}`;
 }
 
-function rubricFromCard(card: UiCard, cat: CardCategory): FixtureRubric {
-  return {
-    keyPoints: card.strong.map((point) => ({ point, example: '' })),
-    redFlags: card.mistakes,
-    expectedStructure:
-      cat === 'behavioural' || cat === 'situational' ? 'star' : 'free',
-  };
+/** Seeded roles ask their questions in random order: each card is a question, so fixed order would repeat the first few every session. */
+const SEED_ROLE_SETTINGS = {
+  ...DEFAULT_ROLE_SETTINGS,
+  questionOrder: 'random',
+};
+
+/** The role's own cards first, then the decks every role shares. */
+function cardsFor(slug: string): SeedCard[] {
+  const own = ROLE_CARDS[slug];
+  if (!own) throw new Error(`No flash cards for role "${slug}"`);
+  return [...own, ...FUNDAMENTALS_CARDS, ...BEHAVIOURAL_CARDS];
 }
 
-function withIds(rubric: FixtureRubric) {
+/** Card and rubric for one seed card, checked against the admin API's own limits. */
+function content(card: SeedCard) {
+  const cardData = flashCardInputSchema.parse({
+    category: card.category,
+    question: card.question,
+    strongAnswerPoints: card.keywords,
+    sampleAnswerOutline: card.answer,
+    tip: card.tip,
+    commonMistakes: card.mistakes,
+  });
+  const rubric = rubricInputSchema.parse({
+    keyPoints: card.keywords.map((point) => ({ point })),
+    redFlags: card.redFlags,
+    expectedStructure: card.structure,
+  });
   return {
-    ...rubric,
-    keyPoints: rubric.keyPoints.map((kp, i) => ({ id: `kp${i + 1}`, ...kp })),
+    cardData,
+    rubric: {
+      ...rubric,
+      keyPoints: rubric.keyPoints.map((kp, i) => ({ id: `kp${i + 1}`, ...kp })),
+    },
   };
 }
 
@@ -110,8 +90,6 @@ async function main() {
     cards: 0,
     questions: 0,
     admins: 0,
-    candidates: 0,
-    assignments: 0,
     filters: 0,
     prompts: 0,
   };
@@ -146,129 +124,68 @@ async function main() {
     }
     const ownerId = adminIds[0];
 
-    // Roles, cards, questions
-    const roleIds: string[] = [];
-    for (const r of UI_ROLES) {
-      const fx = ADMIN_ROLES[r.slug];
-      const roleData = {
-        title: r.title,
-        blurb: r.blurb,
-        descriptionHtml: fx?.description
-          ? descriptionHtml(fx.description.text, fx.description.bullets)
-          : descriptionHtml(r.blurb),
-        seniority: fx?.seniority ?? 'entry',
-        keySkills: fx?.keySkills ?? [],
-        status: 'approved' as const,
-        approvedBy: ownerId,
-        updatedBy: ownerId,
-      };
+    // Roles: drafts until an admin reviews and approves them
+    for (const r of SEED_ROLES) {
       const role = await prisma.jobRole.upsert({
         where: { slug: r.slug },
         create: {
           slug: r.slug,
-          ...roleData,
-          settings: DEFAULT_ROLE_SETTINGS,
-          approvedAt: now,
+          title: r.title,
+          blurb: r.blurb,
+          descriptionHtml: descriptionHtml(
+            r.description.text,
+            r.description.bullets,
+          ),
+          seniority: r.seniority,
+          keySkills: r.keySkills,
+          status: 'draft',
+          settings: SEED_ROLE_SETTINGS,
+          updatedBy: ownerId,
         },
-        update: roleData,
+        update: {},
       });
-      roleIds.push(role.id);
       counts.roles++;
 
-      const cards = UI_CARDS[r.slug] ?? [];
-      const cardIds = new Map<
-        number,
-        { id: string; card: UiCard; category: CardCategory }
-      >();
-      for (const [i, card] of cards.entries()) {
-        const position = i + 1;
-        const cat = category(card.category);
-        const cardData = {
-          category: cat,
-          question: card.question,
-          strongAnswerPoints: card.strong,
-          commonMistakes: card.mistakes,
-          tip: tip(card.tip),
-          status: 'approved' as const,
-          approvedBy: ownerId,
-        };
-        const row = await prisma.flashCard.upsert({
-          where: { jobRoleId_position: { jobRoleId: role.id, position } },
-          create: {
-            jobRoleId: role.id,
-            position,
-            ...cardData,
-            createdBy: ownerId,
-            approvedAt: now,
-          },
-          update: cardData,
-        });
-        cardIds.set(position, { id: row.id, card, category: cat });
-        counts.cards++;
-      }
-
-      for (const q of UI_QUESTIONS[r.slug] ?? []) {
-        const linked = cardIds.get(q.cardPosition);
-        if (!linked)
-          throw new Error(
-            `Question "${q.text}" links to missing card ${q.cardPosition}`,
-          );
-        const fixture = ADMIN_RUBRICS.find(
-          (f) => f.roleSlug === r.slug && q.text.startsWith(f.textPrefix),
-        );
-        const rubric = withIds(
-          fixture?.rubric ?? rubricFromCard(linked.card, linked.category),
-        );
-        const questionData = {
-          flashCardId: linked.id,
-          category: linked.category,
-          difficulty: 'medium' as const,
-          rubric: rubric as Prisma.InputJsonValue,
-          status: 'approved' as const,
-        };
-        const existing = await prisma.question.findFirst({
-          where: { jobRoleId: role.id, text: q.text },
-        });
-        if (existing) {
-          await prisma.question.update({
-            where: { id: existing.id },
-            data: questionData,
-          });
-        } else {
-          await prisma.question.create({
+      // Approved cards, each with an approved interview question linked to it
+      const existingCards = await prisma.flashCard.count({
+        where: { jobRoleId: role.id },
+      });
+      if (existingCards > 0) continue;
+      await prisma.$transaction(async (tx) => {
+        for (const [i, card] of cardsFor(r.slug).entries()) {
+          const { cardData, rubric } = content(card);
+          const row = await tx.flashCard.create({
             data: {
               jobRoleId: role.id,
-              text: q.text,
-              ...questionData,
+              position: i + 1,
+              ...cardData,
+              status: 'approved',
+              createdBy: ownerId,
+              approvedBy: ownerId,
+              approvedAt: now,
+            },
+          });
+          await tx.question.create({
+            data: {
+              jobRoleId: role.id,
+              flashCardId: row.id,
+              text: card.interviewQuestion,
+              category: card.category,
+              difficulty: card.difficulty,
+              rubric: rubric as Prisma.InputJsonValue,
+              status: 'approved',
               createdBy: ownerId,
             },
           });
+          counts.cards++;
+          counts.questions++;
         }
-        counts.questions++;
-      }
-    }
-
-    // Demo candidates, assigned to every role
-    for (const c of DEMO_CANDIDATES) {
-      const user = await prisma.user.upsert({
-        where: { email: c.email },
-        create: {
-          email: c.email,
-          name: c.name,
-          role: 'candidate',
-          status: 'active',
-        },
-        update: { status: 'active', deletedAt: null },
-      });
-      counts.candidates++;
-      for (const jobRoleId of roleIds) {
-        await prisma.roleAssignment.upsert({
-          where: { userId_jobRoleId: { userId: user.id, jobRoleId } },
-          create: { userId: user.id, jobRoleId, assignedBy: ownerId },
-          update: { removedAt: null },
+        // A role still untouched by an admin (no cards) also takes the seeded settings.
+        await tx.jobRole.update({
+          where: { id: role.id },
+          data: { settings: SEED_ROLE_SETTINGS },
         });
-        counts.assignments++;
-      }
+      });
     }
 
     // System saved filters, then workspace settings (created once, never overwritten: admins may
