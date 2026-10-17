@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../../common/audit/audit.service.js';
 import {
   conflict,
@@ -89,6 +89,8 @@ export function uniqueSlug(base: string, taken: Iterable<string>): string {
 /** Job roles for admins: CRUD, approve and archive (FR-ROLE-01..05, spec "Roles and content"). */
 @Injectable()
 export class RolesService {
+  private readonly logger = new Logger(RolesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -279,13 +281,22 @@ export class RolesService {
       },
       select: { user: { select: { email: true, name: true } } },
     });
-    const link = `${this.config.env.APP_CANDIDATE_ORIGIN}/roles/${role.slug}`;
-    for (const { user } of recipients) {
-      await this.email.send({
-        template: 'role-assigned',
-        to: user.email,
-        vars: { name: user.name ?? '', roleTitle: role.title, link },
-      });
+    // The candidate app has no /roles/:slug page; a newly assigned role starts at study.
+    const link = `${this.config.env.APP_CANDIDATE_ORIGIN}/roles/${encodeURIComponent(role.slug)}/study`;
+    // The role is already approved: a queue failure is logged (ids only) and doesn't fail the request.
+    try {
+      for (const { user } of recipients) {
+        await this.email.send({
+          template: 'role-assigned',
+          to: user.email,
+          vars: { name: user.name ?? '', roleTitle: role.title, link },
+        });
+      }
+    } catch (err) {
+      this.logger.error(
+        { roleId: id, err },
+        'Failed to enqueue role-assigned emails',
+      );
     }
     return { role: await this.get(id), notified: recipients.length };
   }
