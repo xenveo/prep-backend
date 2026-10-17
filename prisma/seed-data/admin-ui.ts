@@ -54,13 +54,3 @@ export const ADMIN_WORKSPACE_SETTINGS = {
   inviteLinkExpiryDays: 7,
   lastExportAt: null,
 } as const;
-
-export const DEFAULT_ROLE_SETTINGS = {
-  questionsPerSession: 5,
-  questionOrder: 'fixed',
-  answerGuideSeconds: 120,
-  requireAllCards: true,
-  maxSessionsPerCandidate: 5,
-  sessionWeights: { firstTry: 20, secondTry: 55, learning: 25 },
-  dimensionWeights: { content: 45, structure: 20, delivery: 20, relevance: 15 },
-};

@@ -96,8 +96,13 @@ sudo -u preppilot env $(sudo cat /etc/preppilot/backend.env | xargs) npx prisma 
 Only `DATABASE_URL` is needed. Check each release's migrations first: if one isn't backward
 compatible with the running services, stop them before migrating.
 
-`prisma/seed.ts` is a **development** seed with demo users and mock content: never run it in
-production. A new production database gets `scripts/bootstrap.ts` instead, once, after its first
+Some migrations also carry data: prompt versions, and the four ServiceNow job roles with their
+default flash cards and interview questions (`20261017080000_servicenow_roles`). That one adds
+content only to a role with no flash cards yet, so it never overwrites admin edits. It deletes the
+old mock roles (Junior Data Analyst, Sales Development Rep, Customer Support Associate), or archives
+any a session used. The roles arrive as drafts: an admin reviews each one and approves it.
+
+`prisma/seed.ts` is a **development** seed with demo users: never run it in production. A new production database gets `scripts/bootstrap.ts` instead, once, after its first
 migration (section 12).
 
 ## 5. Environment variables
@@ -285,8 +290,8 @@ rebuild the app when it changes:
 A new environment's database is empty: no settings, prompts or admins, so nobody can log in.
 Once per environment:
 
-1. **Migrate:** run `npx prisma migrate deploy` as in section 4. The migrations also insert some
-   prompt versions.
+1. **Migrate:** run `npx prisma migrate deploy` as in section 4. The migrations also insert the
+   prompt versions and the ServiceNow job roles with their default content (section 4).
 2. **Bootstrap:** from the server checkout (it has the dev dependencies the script needs):
 
    ```sh
@@ -305,7 +310,7 @@ Once per environment:
      (optional), as an active `super_admin`. If the address already exists, the user is made an
      active super admin with no access expiry. A user pending erasure is refused.
 
-   It creates no roles, candidates or demo admins. It is idempotent: a re-run prints
+   It creates no candidates or demo admins. It is idempotent: a re-run prints
    `Bootstrap complete: nothing to do.` It prints ids only (exit code 0 done, 1 failed). It never
    overwrites existing settings, prompts or an admin's name; it only resets a changed system
    saved filter to its definition in code.
@@ -313,7 +318,7 @@ Once per environment:
    200.
 4. **Log in** to the admin app as `BOOTSTRAP_ADMIN_EMAIL`: request a code through the normal OTP
    flow, and it arrives by mail. Then set the sender name and reply-to, invite the other admins,
-   and create the roles.
+   and review and approve the job roles.
 
 Then run the smoke checks below.
 
