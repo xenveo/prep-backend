@@ -1,18 +1,25 @@
 // pm2 process file for production.
 //   npm ci && npm run build && npx prisma migrate deploy
 //   pm2 start ecosystem.config.cjs
-// The app reads .env itself (dotenv); the `env` values below take precedence over it.
+// The app reads .env itself (dotenv) on every start, so `pm2 restart` picks up .env changes; the
+// `env` values below take precedence over it. This file only peeks at .env and never copies it
+// into process.env: pm2 stores the environment an app was started with and reuses it on restart,
+// and dotenv doesn't override what is already set, so a copied .env would freeze stale values.
 //
 // With REDIS_URL set, the API and the queue worker run as separate processes (BullMQ + Redis
 // pub/sub). Without it the queue and pub/sub are in-process, so everything must run in one
 // process (PROCESS_ROLE=all).
+const { readFileSync } = require('node:fs');
 const path = require('node:path');
+const { parseEnv } = require('node:util');
 
+let dotenv = {};
 try {
-  process.loadEnvFile(path.join(__dirname, '.env'));
+  dotenv = parseEnv(readFileSync(path.join(__dirname, '.env'), 'utf8'));
 } catch {
   // No .env: rely on the shell environment.
 }
+const redisUrl = process.env.REDIS_URL ?? dotenv.REDIS_URL;
 
 const common = {
   cwd: __dirname,
@@ -40,14 +47,15 @@ const env = {
   // Any login code works only for these accounts (the super admin and one test candidate);
   // everyone else needs the emailed code.
   AUTH_DEV_ACCEPT_ANY_CODE: 'true',
-  AUTH_DEV_ANY_CODE_ALLOWLIST: 'superadmin@xenveo.com,demo.candidate@example.com',
+  AUTH_DEV_ANY_CODE_ALLOWLIST:
+    'superadmin@xenveo.com,demo.candidate@example.com',
   // Cloudflare -> nginx -> app: the client IP is two hops back.
   TRUST_PROXY: '2',
   // pino-pretty is a dev dependency; production logs are JSON.
   LOG_PRETTY: 'false',
 };
 
-const apps = process.env.REDIS_URL
+const apps = redisUrl
   ? [
       {
         ...common,
