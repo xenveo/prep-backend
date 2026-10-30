@@ -106,6 +106,8 @@ model User {
   name            String?
   title           String?
   role            UserRole
+  /// Admin access (admin or super_admin) on a candidate account, used only from the admin app.
+  adminRole       UserRole?  @map("admin_role")
   status          UserStatus @default(invite_pending)
   accessExpiresAt DateTime?  @map("access_expires_at")
   firstLoginAt    DateTime?  @map("first_login_at")

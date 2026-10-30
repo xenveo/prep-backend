@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../../common/audit/audit.service.js';
+import {
+  ADMIN_ACCESS,
+  adminAccessOf,
+  hasAdminAccess,
+  type AdminAccess,
+} from '../../common/auth/admin-access.js';
 import type { AuthUser } from '../../common/auth/auth.types.js';
 import {
   conflict,
@@ -17,23 +23,30 @@ import { InvitesService } from './invites.service.js';
 import type { AdminView } from './users.schemas.js';
 import { UsersService } from './users.service.js';
 
-type Access = 'admin' | 'super_admin';
-
-const ADMIN_ROLES: Access[] = ['admin', 'super_admin'];
-const accessLabel = (a: Access) =>
+const accessLabel = (a: AdminAccess) =>
   a === 'super_admin' ? 'Super admin' : 'Admin';
 const LAST_SUPER_ADMIN = 'There must be at least one Super admin';
 const EMAIL_TAKEN = 'Already an admin or invited';
 
+/** Statuses of a listed admin (active or invite pending). */
+const LISTED_STATUSES: UserStatus[] = ['active', 'invite_pending'];
 /** Statuses of a removed admin, whose row a new invite reuses (remove() sets `revoked`). */
 const REMOVED_STATUSES: UserStatus[] = ['revoked', 'deactivated'];
 const REMOVED_ADMIN = {
   deletedAt: null,
-  role: { in: ADMIN_ROLES },
+  role: { in: ADMIN_ACCESS },
   status: { in: REMOVED_STATUSES },
+} satisfies Prisma.UserWhereInput;
+/** A candidate who can be granted admin access: listed, not erased, no admin access yet. */
+const GRANTABLE_CANDIDATE = {
+  deletedAt: null,
+  role: 'candidate',
+  adminRole: null,
+  status: { in: LISTED_STATUSES },
 } satisfies Prisma.UserWhereInput;
 
 type AdminRow = User & { invites: { sentAt: Date }[] };
+type ListedAdmin = AdminRow & { access: AdminAccess };
 
 /** Admin accounts (spec "Workspace settings, admins, audit"). Mutations are super-admin only. */
 @Injectable()
@@ -46,12 +59,16 @@ export class AdminsService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Active admins and pending admin invites, oldest first. Removed admins are not listed. */
+  /**
+   * Active admins and pending admin invites (admin accounts and candidates with admin access),
+   * oldest first. Removed admins are not listed.
+   */
   async list(): Promise<AdminView[]> {
     const rows = await this.prisma.user.findMany({
       where: {
-        role: { in: ADMIN_ROLES },
-        status: { in: ['active', 'invite_pending'] },
+        deletedAt: null,
+        status: { in: LISTED_STATUSES },
+        ...hasAdminAccess(),
       },
       include: latestInvite,
       orderBy: { createdAt: 'asc' },
@@ -61,11 +78,13 @@ export class AdminsService {
 
   /**
    * Invites an admin by email. A removed admin (revoked or deactivated) is re-invited on their
-   * existing row; any other user with the email is a 409.
+   * existing row. An active or pending candidate is granted admin access on their own account
+   * (`adminRole`) and gets an admin login link; their role, status, sessions and any pending
+   * candidate invite are untouched. Any other user with the email is a 409.
    */
   async invite(
     actor: AuthUser,
-    input: { email: string; access: Access },
+    input: { email: string; access: AdminAccess },
     ip: string | null,
   ): Promise<AdminView> {
     const existing = await this.prisma.unfiltered.user.findUnique({
@@ -74,11 +93,14 @@ export class AdminsService {
         id: true,
         email: true,
         role: true,
+        adminRole: true,
         status: true,
         deletedAt: true,
       },
     });
-    if (existing && !isRemovedAdmin(existing)) throw conflict(EMAIL_TAKEN);
+    const reinvite = existing !== null && isRemovedAdmin(existing);
+    const grant = existing !== null && isGrantableCandidate(existing);
+    if (existing && !reinvite && !grant) throw conflict(EMAIL_TAKEN);
     const { inviteLinkExpiryDays } = await this.settings.get();
     const { user, token } = await this.prisma.$transaction(async (tx) => {
       if (!existing) {
@@ -96,6 +118,21 @@ export class AdminsService {
         );
         return { user, token };
       }
+      if (grant) {
+        // Conditional, so a concurrent grant can't issue a second link. Not a reissue: the
+        // candidate's own pending invite link must keep working.
+        const { count } = await tx.user.updateMany({
+          where: { id: existing.id, ...GRANTABLE_CANDIDATE },
+          data: { adminRole: input.access },
+        });
+        if (count === 0) throw conflict(EMAIL_TAKEN);
+        const { token } = await this.invites.issueInvite(
+          tx,
+          { userId: existing.id, email: existing.email, invitedBy: actor.id },
+          inviteLinkExpiryDays,
+        );
+        return { user: existing, token };
+      }
       // Conditional on still being removed, so a concurrent re-invite can't issue a second link.
       const { count } = await tx.user.updateMany({
         where: { id: existing.id, ...REMOVED_ADMIN },
@@ -110,7 +147,7 @@ export class AdminsService {
       return { user: existing, token };
     });
     // Removal already signed them out; this guarantees no old session revives once they accept.
-    if (existing) await this.users.revokeSessions(user.id);
+    if (reinvite) await this.users.revokeSessions(user.id);
     await this.audit.record({
       actorId: actor.id,
       action: 'Invited an admin',
@@ -157,7 +194,7 @@ export class AdminsService {
       to: admin.email,
       vars: {
         link: this.invites.adminLink(admin.email, token),
-        access: admin.role as Access,
+        access: admin.access,
         expiresDays: inviteLinkExpiryDays,
       },
     });
@@ -167,7 +204,7 @@ export class AdminsService {
   async changeAccess(
     actor: AuthUser,
     id: string,
-    access: Access,
+    access: AdminAccess,
     ip: string | null,
   ): Promise<AdminView> {
     if (id === actor.id)
@@ -175,13 +212,17 @@ export class AdminsService {
     const before = await this.prisma.$transaction(async (tx) => {
       await lockAdmins(tx);
       const admin = await this.load(id, tx);
-      if (admin.role === access) return admin;
-      if (admin.role === 'super_admin' && admin.status === 'active')
+      if (admin.access === access) return admin;
+      if (admin.access === 'super_admin' && admin.status === 'active')
         await assertAnotherSuperAdmin(tx, admin.id);
-      await tx.user.update({ where: { id }, data: { role: access } });
+      await tx.user.update({
+        where: { id },
+        data:
+          admin.role === 'candidate' ? { adminRole: access } : { role: access },
+      });
       return admin;
     });
-    const from = before.role as Access;
+    const from = before.access;
     if (from !== access) {
       await this.audit.record({
         actorId: actor.id,
@@ -197,16 +238,24 @@ export class AdminsService {
     return toAdminView(await this.load(id));
   }
 
-  /** Removes an admin: status revoked, pending invites withdrawn, signed out everywhere. */
+  /**
+   * Removes an admin: status revoked, pending invites withdrawn, signed out everywhere. A candidate
+   * with admin access only loses it (`adminRole` cleared) and keeps their candidate account and
+   * invites; they are still signed out so admin sessions end.
+   */
   async remove(actor: AuthUser, id: string, ip: string | null): Promise<void> {
     if (id === actor.id) throw validationFailed('You can’t remove yourself');
     const admin = await this.prisma.$transaction(async (tx) => {
       await lockAdmins(tx);
       const admin = await this.load(id, tx);
-      if (admin.role === 'super_admin' && admin.status === 'active')
+      if (admin.access === 'super_admin' && admin.status === 'active')
         await assertAnotherSuperAdmin(tx, admin.id);
-      await tx.user.update({ where: { id }, data: { status: 'revoked' } });
-      await this.invites.revokePending(tx, id);
+      if (admin.role === 'candidate') {
+        await tx.user.update({ where: { id }, data: { adminRole: null } });
+      } else {
+        await tx.user.update({ where: { id }, data: { status: 'revoked' } });
+        await this.invites.revokePending(tx, id);
+      }
       return admin;
     });
     await this.users.revokeSessions(id);
@@ -216,8 +265,9 @@ export class AdminsService {
       entity: 'user',
       entityId: id,
       itemLabel: admin.name ?? admin.email,
-      before: { access: admin.role, status: admin.status },
-      after: { status: 'revoked' },
+      before: { access: admin.access, status: admin.status },
+      after:
+        admin.role === 'candidate' ? { access: null } : { status: 'revoked' },
       ip,
     });
   }
@@ -226,18 +276,19 @@ export class AdminsService {
   private async load(
     id: string,
     db: PrismaService | Prisma.TransactionClient = this.prisma,
-  ): Promise<AdminRow> {
+  ): Promise<ListedAdmin> {
     const admin = await db.user.findFirst({
       where: {
         id,
         deletedAt: null,
-        role: { in: ADMIN_ROLES },
-        status: { in: ['active', 'invite_pending'] },
+        status: { in: LISTED_STATUSES },
+        ...hasAdminAccess(),
       },
       include: latestInvite,
     });
-    if (!admin) throw notFound('Admin not found');
-    return admin;
+    const access = admin && adminAccessOf(admin);
+    if (!admin || !access) throw notFound('Admin not found');
+    return { ...admin, access };
   }
 }
 
@@ -262,8 +313,8 @@ async function assertAnotherSuperAdmin(
     where: {
       id: { not: exceptId },
       deletedAt: null,
-      role: 'super_admin',
       status: 'active',
+      ...hasAdminAccess(['super_admin']),
     },
   });
   if (others === 0) throw validationFailed(LAST_SUPER_ADMIN);
@@ -274,8 +325,19 @@ function isRemovedAdmin(
 ): boolean {
   return (
     user.deletedAt === null &&
-    (ADMIN_ROLES as string[]).includes(user.role) &&
+    (ADMIN_ACCESS as string[]).includes(user.role) &&
     REMOVED_STATUSES.includes(user.status)
+  );
+}
+
+function isGrantableCandidate(
+  user: Pick<User, 'role' | 'adminRole' | 'status' | 'deletedAt'>,
+): boolean {
+  return (
+    user.deletedAt === null &&
+    user.role === 'candidate' &&
+    user.adminRole === null &&
+    LISTED_STATUSES.includes(user.status)
   );
 }
 
@@ -286,7 +348,7 @@ function toAdminView(user: AdminRow): AdminView {
     name: user.name,
     email: user.email,
     ...(user.title ? { title: user.title } : {}),
-    access: user.role === 'super_admin' ? 'super_admin' : 'admin',
+    access: adminAccessOf(user) === 'super_admin' ? 'super_admin' : 'admin',
     status: user.status === 'invite_pending' ? 'invite_pending' : 'active',
     lastActiveAt: user.lastActiveAt?.toISOString() ?? null,
     ...(invitedAt ? { invitedAt: invitedAt.toISOString() } : {}),

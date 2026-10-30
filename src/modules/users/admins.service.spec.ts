@@ -14,6 +14,7 @@ const adminRow = (over: Record<string, unknown> = {}) => ({
   name: 'Kavya Menon',
   title: null,
   role: 'super_admin',
+  adminRole: null,
   status: 'active',
   lastActiveAt: null,
   invites: [],
@@ -81,9 +82,33 @@ describe('AdminsService', () => {
     ]);
   });
 
+  it('list includes candidates with admin access', async () => {
+    const { service, prisma } = setup();
+    prisma.user.findMany.mockResolvedValue([
+      adminRow({ id: 'c1', role: 'candidate', adminRole: 'super_admin' }),
+    ]);
+    const [view] = await service.list();
+    expect(view).toMatchObject({ id: 'c1', access: 'super_admin' });
+    expect(prisma.user.findMany.mock.calls[0][0].where).toEqual({
+      deletedAt: null,
+      status: { in: ['active', 'invite_pending'] },
+      OR: [
+        { role: { in: ['admin', 'super_admin'] } },
+        { role: 'candidate', adminRole: { in: ['admin', 'super_admin'] } },
+      ],
+    });
+  });
+
   describe('invite', () => {
     it.each([
-      ['an active candidate', { role: 'candidate', status: 'active' }],
+      [
+        'a candidate who is already an admin',
+        { role: 'candidate', adminRole: 'admin', status: 'active' },
+      ],
+      [
+        'an erased candidate',
+        { role: 'candidate', status: 'active', deletedAt: new Date() },
+      ],
       ['a deactivated candidate', { role: 'candidate', status: 'deactivated' }],
       ['a revoked candidate', { role: 'candidate', status: 'revoked' }],
       ['an active admin', { role: 'admin', status: 'active' }],
@@ -97,6 +122,7 @@ describe('AdminsService', () => {
       prisma.unfiltered.user.findUnique.mockResolvedValue({
         id: 'x',
         email: 'a@b.co',
+        adminRole: null,
         deletedAt: null,
         ...user,
       });
@@ -119,6 +145,7 @@ describe('AdminsService', () => {
         id: 'a2',
         email: 'kavya@company.com',
         role: 'super_admin',
+        adminRole: null,
         status: 'revoked',
         deletedAt: null,
       });
@@ -172,12 +199,98 @@ describe('AdminsService', () => {
       });
     });
 
+    it.each(['active', 'invite_pending'])(
+      'grants admin access to an existing %s candidate on their own account',
+      async (status) => {
+        const { service, prisma, invites, users, audit } = setup();
+        prisma.unfiltered.user.findUnique.mockResolvedValue({
+          id: 'c1',
+          email: 'cand@b.co',
+          role: 'candidate',
+          adminRole: null,
+          status,
+          deletedAt: null,
+        });
+        prisma.user.findFirst.mockResolvedValue(
+          adminRow({
+            id: 'c1',
+            email: 'cand@b.co',
+            role: 'candidate',
+            adminRole: 'admin',
+            status,
+          }),
+        );
+        const res = await service.invite(
+          actor,
+          { email: 'cand@b.co', access: 'admin' },
+          '1.1.1.1',
+        );
+        expect(res).toMatchObject({ id: 'c1', access: 'admin', status });
+        expect(prisma.user.create).not.toHaveBeenCalled();
+        expect(prisma.user.update).not.toHaveBeenCalled();
+        expect(prisma.user.updateMany).toHaveBeenCalledWith({
+          where: {
+            id: 'c1',
+            deletedAt: null,
+            role: 'candidate',
+            adminRole: null,
+            status: { in: ['active', 'invite_pending'] },
+          },
+          data: { adminRole: 'admin' },
+        });
+        expect(invites.issueInvite).toHaveBeenCalledWith(
+          prisma,
+          { userId: 'c1', email: 'cand@b.co', invitedBy: 'me' },
+          7,
+        );
+        expect(invites.reissue).not.toHaveBeenCalled();
+        expect(users.revokeSessions).not.toHaveBeenCalled();
+        expect(audit.record).toHaveBeenCalledWith({
+          actorId: 'me',
+          action: 'Invited an admin',
+          entity: 'user',
+          entityId: 'c1',
+          itemLabel: 'cand@b.co',
+          after: { access: 'admin' },
+          ip: '1.1.1.1',
+        });
+        expect(invites.sendEmail).toHaveBeenCalledWith('c1', {
+          template: 'admin-invite',
+          to: 'cand@b.co',
+          vars: {
+            link: 'https://admin.test/cand@b.co/tok',
+            access: 'admin',
+            expiresDays: 7,
+          },
+        });
+      },
+    );
+
+    it('is a 409 when a concurrent invite already granted the candidate access', async () => {
+      const { service, prisma, invites, audit } = setup();
+      prisma.unfiltered.user.findUnique.mockResolvedValue({
+        id: 'c1',
+        email: 'cand@b.co',
+        role: 'candidate',
+        adminRole: null,
+        status: 'active',
+        deletedAt: null,
+      });
+      prisma.user.updateMany.mockResolvedValue({ count: 0 });
+      await expect(
+        service.invite(actor, { email: 'cand@b.co', access: 'admin' }, null),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(invites.issueInvite).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('is a 409 when a concurrent invite already reactivated the admin', async () => {
       const { service, prisma, invites, audit } = setup();
       prisma.unfiltered.user.findUnique.mockResolvedValue({
         id: 'a2',
         email: 'kavya@company.com',
         role: 'admin',
+        adminRole: null,
         status: 'deactivated',
         deletedAt: null,
       });
@@ -276,6 +389,55 @@ describe('AdminsService', () => {
       });
     });
 
+    it('counts a candidate Super admin as another Super admin', async () => {
+      const { service, prisma } = setup();
+      prisma.user.findFirst.mockResolvedValue(adminRow());
+      prisma.user.count.mockResolvedValue(1);
+      await service.changeAccess(actor, 'a2', 'admin', null);
+      expect(prisma.user.count).toHaveBeenCalledWith({
+        where: {
+          id: { not: 'a2' },
+          deletedAt: null,
+          status: 'active',
+          OR: [
+            { role: { in: ['super_admin'] } },
+            { role: 'candidate', adminRole: { in: ['super_admin'] } },
+          ],
+        },
+      });
+    });
+
+    it('keeps at least one active Super admin when the target is a candidate', async () => {
+      const { service, prisma } = setup();
+      prisma.user.findFirst.mockResolvedValue(
+        adminRow({ role: 'candidate', adminRole: 'super_admin' }),
+      );
+      prisma.user.count.mockResolvedValue(0);
+      await expect(
+        service.changeAccess(actor, 'a2', 'admin', null),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('changes a candidate’s adminRole, not their role', async () => {
+      const { service, prisma, audit } = setup();
+      prisma.user.findFirst.mockResolvedValue(
+        adminRow({ role: 'candidate', adminRole: 'admin' }),
+      );
+      await service.changeAccess(actor, 'a2', 'super_admin', null);
+      expect(prisma.user.count).not.toHaveBeenCalled();
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'a2' },
+        data: { adminRole: 'super_admin' },
+      });
+      expect(audit.record.mock.calls[0][0]).toMatchObject({
+        action: 'Changed admin access',
+        itemLabel: 'Kavya Menon: Admin → Super admin',
+        before: { access: 'admin' },
+        after: { access: 'super_admin' },
+      });
+    });
+
     it('is a 404 for a non-admin target', async () => {
       const { service, prisma } = setup();
       prisma.user.findFirst.mockResolvedValue(null);
@@ -308,6 +470,31 @@ describe('AdminsService', () => {
       expect(audit.record.mock.calls[0][0]).toMatchObject({
         action: 'Removed an admin',
         itemLabel: 'Kavya Menon',
+      });
+    });
+
+    it('clears a candidate’s admin access but keeps their account and invites', async () => {
+      const { service, prisma, invites, users, audit } = setup();
+      prisma.user.findFirst.mockResolvedValue(
+        adminRow({ role: 'candidate', adminRole: 'admin' }),
+      );
+      await service.remove(actor, 'a2', '1.1.1.1');
+      expect(prisma.user.update).toHaveBeenCalledTimes(1);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'a2' },
+        data: { adminRole: null },
+      });
+      expect(invites.revokePending).not.toHaveBeenCalled();
+      expect(users.revokeSessions).toHaveBeenCalledWith('a2');
+      expect(audit.record).toHaveBeenCalledWith({
+        actorId: 'me',
+        action: 'Removed an admin',
+        entity: 'user',
+        entityId: 'a2',
+        itemLabel: 'Kavya Menon',
+        before: { access: 'admin', status: 'active' },
+        after: { access: null },
+        ip: '1.1.1.1',
       });
     });
   });

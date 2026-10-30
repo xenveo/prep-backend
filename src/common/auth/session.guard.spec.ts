@@ -164,6 +164,27 @@ describe('SessionGuard', () => {
     ]);
   });
 
+  it('gives a candidate with admin access their admin role only in the admin app', async () => {
+    const roleVia = async (headers: Record<string, string>, user: object) => {
+      prisma.authSession.findUnique.mockResolvedValue(makeSession({ user }));
+      const req: Partial<AuthedRequest> = {
+        cookies: { pp_session: 'tok', pp_admin_session: 'tok' },
+        headers,
+      };
+      await run(req);
+      return req.user?.role;
+    };
+    const admin = { 'x-preppilot-app': 'admin' };
+    const candidateAdmin = { adminRole: 'super_admin' };
+    expect(await roleVia(admin, candidateAdmin)).toBe('super_admin');
+    expect(await roleVia({}, candidateAdmin)).toBe('candidate');
+    expect(await roleVia(admin, { role: 'admin', adminRole: null })).toBe(
+      'admin',
+    );
+    expect(await roleVia({}, { role: 'admin', adminRole: null })).toBe('admin');
+    expect(await roleVia(admin, { adminRole: null })).toBe('candidate');
+  });
+
   it('slides the expiry and touches lastActiveAt after 5 minutes', async () => {
     prisma.authSession.findUnique.mockResolvedValue(
       makeSession({

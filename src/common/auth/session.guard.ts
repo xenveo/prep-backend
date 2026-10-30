@@ -10,7 +10,7 @@ import { sha256Hex } from '../crypto.js';
 import { AppError } from '../errors/app-error.js';
 import type { AuthedRequest } from './auth.types.js';
 import { IS_PUBLIC_KEY } from './public.decorator.js';
-import { sessionCookieName } from './session-cookie.js';
+import { ADMIN_SESSION_COOKIE, sessionCookieName } from './session-cookie.js';
 
 const SLIDE_EVERY_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -79,7 +79,13 @@ export class SessionGuard implements CanActivate {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
+      // A candidate who is also an admin acts as one only in the admin app.
+      role:
+        cookie === ADMIN_SESSION_COOKIE &&
+        user.role === 'candidate' &&
+        user.adminRole
+          ? user.adminRole
+          : user.role,
       status: user.status,
       accessExpiresAt: user.accessExpiresAt,
       authSessionId: session.id,

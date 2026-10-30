@@ -497,4 +497,21 @@ describe('AuthService', () => {
       invitedAt: sentAt.toISOString(),
     });
   });
+
+  it("adminMe reports a candidate-admin's admin role as their access", async () => {
+    const { service, prisma } = setup();
+    prisma.user.findUniqueOrThrow.mockResolvedValue(
+      user({ role: 'candidate', adminRole: 'super_admin', invites: [] }),
+    );
+    const response = await service.adminMe({
+      id: 'u1',
+      email: EMAIL,
+      name: 'Priya Shah',
+      role: 'super_admin',
+      status: 'active',
+      accessExpiresAt: null,
+      authSessionId: 'as1',
+    });
+    expect(response.access).toBe('super_admin');
+  });
 });

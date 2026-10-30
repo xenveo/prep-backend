@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { isAllowlisted } from '../../adapters/mail/resend-mail.adapter.js';
+import { adminAccessOf } from '../../common/auth/admin-access.js';
 import type { AuthUser } from '../../common/auth/auth.types.js';
 import {
   hmacHex,
@@ -148,7 +149,7 @@ export class AuthService {
       name: user.name,
       email: user.email,
       ...(user.title ? { title: user.title } : {}),
-      access: user.role === 'super_admin' ? 'super_admin' : 'admin',
+      access: adminAccessOf(user) ?? 'admin',
       status: user.status === 'invite_pending' ? 'invite_pending' : 'active',
       lastActiveAt: user.lastActiveAt?.toISOString() ?? null,
       ...(invitedAt ? { invitedAt: invitedAt.toISOString() } : {}),

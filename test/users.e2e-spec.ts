@@ -560,6 +560,64 @@ describe('Users and invites (e2e)', () => {
       expect(dup.body.error.code).toBe('conflict');
     });
 
+    it('grants admin access to an existing candidate and removes it, keeping the candidate', async () => {
+      const { user } = await loginAs(t.prisma, {
+        email: emailFor('candadmin'),
+      });
+      const res = await t
+        .http()
+        .post('/api/admin/admins')
+        .set(asSuper())
+        .send({ email: emailFor('candadmin'), access: 'admin' })
+        .expect(201);
+      expect(res.body).toMatchObject({
+        id: user.id,
+        access: 'admin',
+        status: 'active',
+      });
+      expect(lastMailTo(emailFor('candadmin'))?.template).toBe('admin-invite');
+      const list = await t
+        .http()
+        .get('/api/admin/admins')
+        .set(asSuper())
+        .expect(200);
+      expect(list.body).toContainEqual(
+        expect.objectContaining({ id: user.id, access: 'admin' }),
+      );
+      expect(
+        await t.prisma.user.findUniqueOrThrow({
+          where: { id: user.id },
+          select: { role: true, adminRole: true, status: true },
+        }),
+      ).toEqual({ role: 'candidate', adminRole: 'admin', status: 'active' });
+      await t
+        .http()
+        .post('/api/admin/admins')
+        .set(asSuper())
+        .send({ email: emailFor('candadmin'), access: 'super_admin' })
+        .expect(409);
+
+      await t
+        .http()
+        .delete(`/api/admin/admins/${user.id}`)
+        .set(asSuper())
+        .expect(204);
+      expect(
+        await t.prisma.user.findUniqueOrThrow({
+          where: { id: user.id },
+          select: { role: true, adminRole: true, status: true },
+        }),
+      ).toEqual({ role: 'candidate', adminRole: null, status: 'active' });
+      const after = await t
+        .http()
+        .get('/api/admin/admins')
+        .set(asSuper())
+        .expect(200);
+      expect(after.body).not.toContainEqual(
+        expect.objectContaining({ id: user.id }),
+      );
+    });
+
     it('blocks self-demotion and self-removal', async () => {
       const demote = await t
         .http()

@@ -354,6 +354,56 @@ describe('Auth (e2e)', () => {
     await http().get('/api/me').set('Cookie', jar).expect(200);
   });
 
+  it('a candidate with admin access is an admin only in the admin app', async () => {
+    const adminOrigin = process.env.APP_ADMIN_ORIGIN!;
+    const user = await createUser('cand-and-admin', {
+      status: 'active',
+      adminRole: 'admin',
+    });
+    const candidateCookie = await login(user.email);
+
+    const me = await http()
+      .get('/api/me')
+      .set('Cookie', candidateCookie)
+      .expect(200);
+    expect(me.body).toMatchObject({ id: user.id, role: 'candidate' });
+    await http()
+      .get('/api/admin/me')
+      .set('Cookie', candidateCookie)
+      .expect(404);
+
+    // A magic link, since the code resend cooldown is still running.
+    const token = randomToken();
+    await prisma.invite.create({
+      data: {
+        email: user.email,
+        userId: user.id,
+        tokenHash: sha256Hex(token),
+        sentAt: new Date(),
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+    });
+    const res = await http()
+      .post('/api/auth/verify')
+      .set('Origin', adminOrigin)
+      .send({ token })
+      .expect(200, { result: 'ok' });
+    const adminCookie = ([] as string[])
+      .concat(res.headers['set-cookie'] ?? [])
+      .find((c) => c.startsWith('pp_admin_session='))
+      ?.split(';')[0];
+    expect(adminCookie).toBeDefined();
+
+    const jar = `${candidateCookie}; ${adminCookie}`;
+    const adminMe = await http()
+      .get('/api/admin/me')
+      .set('Cookie', jar)
+      .set('Origin', adminOrigin)
+      .expect(200);
+    expect(adminMe.body).toMatchObject({ id: user.id, access: 'admin' });
+    await http().get('/api/admin/me').set('Cookie', jar).expect(404);
+  });
+
   it('logout, deactivation and access expiry end the session', async () => {
     const a = await createUser('logout', { status: 'active' });
     const cookieA = await login(a.email);
