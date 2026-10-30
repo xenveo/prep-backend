@@ -18,6 +18,8 @@ export default defineConfig({
       STORAGE_PROVIDER: 'local',
       LOCAL_STORAGE_DIR: '.data/e2e-storage',
       PROCESS_ROLE: 'all',
+      // In-process queue and pub/sub: a shared Redis would hand test jobs to another worker (a deploy's).
+      REDIS_URL: '',
     },
     // Specs share one database; run files one at a time.
     fileParallelism: false,
