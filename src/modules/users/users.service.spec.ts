@@ -262,7 +262,7 @@ describe('UsersService', () => {
         vars: {
           name: 'Neha Kapoor',
           roleTitle: 'Store Manager',
-          link: 'https://app.test/roles/store-manager',
+          link: 'https://app.test/roles/store-manager/study',
         },
       });
     });

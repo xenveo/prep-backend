@@ -276,7 +276,8 @@ export class UsersService {
           vars: {
             name: user.name ?? '',
             roleTitle: role.title,
-            link: `${this.config.env.APP_CANDIDATE_ORIGIN}/roles/${encodeURIComponent(role.slug)}`,
+            // The candidate app has no /roles/:slug page; a newly assigned role starts at study.
+            link: `${this.config.env.APP_CANDIDATE_ORIGIN}/roles/${encodeURIComponent(role.slug)}/study`,
           },
         });
       }
