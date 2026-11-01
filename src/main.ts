@@ -23,7 +23,10 @@ configureApp(app);
 
 // Init hooks run inside listen(); one failing (Redis unreachable within REDIS_CONNECT_TIMEOUT_MS)
 // exits non-zero with one line, so the orchestrator restarts the process instead of it hanging.
-await app.listen(env.PORT).catch((err: unknown) => {
+const listening = env.API_BIND_HOST
+  ? app.listen(env.PORT, env.API_BIND_HOST)
+  : app.listen(env.PORT);
+await listening.catch((err: unknown) => {
   console.error(
     `Startup failed: ${err instanceof Error ? err.message : String(err)}`,
   );

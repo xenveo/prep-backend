@@ -4,6 +4,9 @@ import { UsersModule } from '../users/users.module.js';
 import { CandidateReportController } from './candidate-report.controller.js';
 import { CandidatesReadController } from './candidates-read.controller.js';
 import { CandidatesReadService } from './candidates-read.service.js';
+import { ExecutiveController } from './executive.controller.js';
+import { ExecutiveService } from './executive.service.js';
+import { ExecutiveInsightsService } from './executive-insights.service.js';
 import { FlagsController } from './flags.controller.js';
 import { FlagsService } from './flags.service.js';
 import { SessionReportPdfService } from './pdf/session-report-pdf.service.js';
@@ -22,6 +25,7 @@ import { SessionReviewService } from './session-review.service.js';
     CandidateReportController,
     FlagsController,
     ReportsController,
+    ExecutiveController,
   ],
   providers: [
     CandidatesReadService,
@@ -29,6 +33,8 @@ import { SessionReviewService } from './session-review.service.js';
     SessionReportPdfService,
     FlagsService,
     ReportsService,
+    ExecutiveService,
+    ExecutiveInsightsService,
   ],
 })
 export class ReportsModule {}

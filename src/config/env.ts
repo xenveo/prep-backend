@@ -23,6 +23,8 @@ export const envSchema = z.object({
     .enum(['development', 'test', 'production'])
     .default('development'),
   PORT: z.coerce.number().int().default(3000),
+  /** Optional listening interface. Unset preserves Nest's default; start:local forces IPv4 loopback. */
+  API_BIND_HOST: z.string().trim().min(1).max(253).optional(),
   /** api = HTTP only; worker = queue processors only (src/worker.ts); all = both (dev, tests, in-memory queue). */
   PROCESS_ROLE: z.enum(['all', 'api', 'worker']).default('all'),
   /** Worker only: when set, src/worker.ts serves GET /ready (readiness JSON) on this port. */
@@ -68,9 +70,9 @@ export const envSchema = z.object({
   OTP_REQUESTS_PER_HOUR: z.coerce.number().int().default(5),
   OTP_IP_REQUESTS_PER_HOUR: z.coerce.number().int().default(20),
   OTP_RESEND_COOLDOWN_SEC: z.coerce.number().int().default(30),
-  /** Any well-formed code logs in an eligible user. In production only with AUTH_DEV_ANY_CODE_ALLOWLIST. */
+  /** Non-production only: any well-formed code logs in an eligible user. */
   AUTH_DEV_ACCEPT_ANY_CODE: bool,
-  /** Emails AUTH_DEV_ACCEPT_ANY_CODE applies to (addresses or "@domain"); empty = everyone. Required in production. */
+  /** Non-production any-code accounts (addresses or "@domain"); empty = everyone. */
   AUTH_DEV_ANY_CODE_ALLOWLIST: emailList,
   AI_ADMIN_CALLS_PER_HOUR: z.coerce.number().int().default(30),
 
@@ -104,14 +106,9 @@ export const envSchema = z.object({
   SENTRY_DSN: z.string().optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 }).refine(
-  (env) =>
-    !(
-      env.AUTH_DEV_ACCEPT_ANY_CODE &&
-      env.NODE_ENV === 'production' &&
-      !env.AUTH_DEV_ANY_CODE_ALLOWLIST.length
-    ),
+  (env) => !(env.AUTH_DEV_ACCEPT_ANY_CODE && env.NODE_ENV === 'production'),
   {
-    message: 'needs AUTH_DEV_ANY_CODE_ALLOWLIST in production',
+    message: 'must be disabled in production',
     path: ['AUTH_DEV_ACCEPT_ANY_CODE'],
   },
 );

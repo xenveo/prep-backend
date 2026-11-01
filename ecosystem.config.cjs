@@ -44,11 +44,9 @@ const env = {
   APP_ADMIN_ORIGIN: 'https://prep-admin.xenveo.com',
   // The frontends' servers read the session cookie, so it must cover their hosts too.
   SESSION_COOKIE_DOMAIN: 'xenveo.com',
-  // Any login code works only for these accounts (the super admin and one test candidate);
-  // everyone else needs the emailed code.
-  AUTH_DEV_ACCEPT_ANY_CODE: 'true',
-  AUTH_DEV_ANY_CODE_ALLOWLIST:
-    'superadmin@xenveo.com,demo.candidate@example.com',
+  // Production always checks the emailed OTP, even if a previous PM2 environment enabled bypass.
+  AUTH_DEV_ACCEPT_ANY_CODE: 'false',
+  AUTH_DEV_ANY_CODE_ALLOWLIST: '',
   // Cloudflare -> nginx -> app: the client IP is two hops back.
   TRUST_PROXY: '2',
   // pino-pretty is a dev dependency; production logs are JSON.

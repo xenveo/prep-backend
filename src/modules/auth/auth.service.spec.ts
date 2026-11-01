@@ -294,6 +294,65 @@ describe('AuthService', () => {
   });
 
   describe('verify with AUTH_DEV_ACCEPT_ANY_CODE', () => {
+    const productionBypass = {
+      NODE_ENV: 'production',
+      AUTH_DEV_ACCEPT_ANY_CODE: true,
+      AUTH_DEV_ANY_CODE_ALLOWLIST: [EMAIL],
+    };
+
+    it('never creates a production admin session from an arbitrary allowlisted code', async () => {
+      const { service, prisma, tx } = setup(productionBypass);
+      prisma.user.findUnique.mockResolvedValue(user({ role: 'super_admin' }));
+      prisma.authCode.findFirst.mockResolvedValue(null);
+      await expect(
+        service.verify({ email: EMAIL, code: '000000' }),
+      ).resolves.toEqual({ result: 'expired' });
+      expect(prisma.authCode.findFirst).toHaveBeenCalled();
+      expect(tx.authSession.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps normal production OTP verification even if bypass flags reach the service', async () => {
+      const { service, prisma, tx } = setup(productionBypass);
+      prisma.user.findUnique.mockResolvedValue(user({ role: 'super_admin' }));
+      prisma.authCode.findFirst.mockResolvedValue(codeRow('123456'));
+      prisma.authCode.update.mockResolvedValue({ tries: 1 });
+      await expect(
+        service.verify({ email: EMAIL, code: '000000' }),
+      ).resolves.toEqual({ result: 'wrong' });
+      expect(tx.authSession.create).not.toHaveBeenCalled();
+      await expect(
+        service.verify({ email: EMAIL, code: '123456' }),
+      ).resolves.toMatchObject({ result: 'ok' });
+      expect(tx.authSession.create).toHaveBeenCalledOnce();
+    });
+
+    it('does not skip production request limits for an allowlisted account', async () => {
+      const { service, rateLimiter, email } = setup(productionBypass);
+      rateLimiter.consume.mockResolvedValue({
+        allowed: false,
+        retryAfterSec: 99,
+      });
+      await expect(service.requestCode(EMAIL, '1.2.3.4')).resolves.toEqual({
+        result: 'rate-limited',
+        retryAfterSec: 99,
+      });
+      expect(rateLimiter.consume).toHaveBeenCalledOnce();
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('sends the real production login code for an allowlisted account', async () => {
+      const { service, prisma, rateLimiter, email } = setup(productionBypass);
+      prisma.user.findUnique.mockResolvedValue(user({ role: 'super_admin' }));
+      await expect(service.requestCode(EMAIL, '1.2.3.4')).resolves.toEqual({
+        result: 'sent',
+      });
+      expect(rateLimiter.consume).toHaveBeenCalledTimes(3);
+      expect(prisma.authCode.create).toHaveBeenCalledOnce();
+      expect(email.send).toHaveBeenCalledWith(
+        expect.objectContaining({ template: 'login-code', to: EMAIL }),
+      );
+    });
+
     it('logs in an eligible user with any code, even without a requested code', async () => {
       const { service, prisma, tx } = setup({ AUTH_DEV_ACCEPT_ANY_CODE: true });
       prisma.user.findUnique.mockResolvedValue(user());

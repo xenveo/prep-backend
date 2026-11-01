@@ -10,6 +10,9 @@ export default defineConfig({
     // e2e never calls real providers (AGENTS.md); these win over .env because dotenv doesn't override.
     env: {
       NODE_ENV: 'test',
+      // Auth regressions must exercise real OTP checks, regardless of local .env shortcuts.
+      AUTH_DEV_ACCEPT_ANY_CODE: 'false',
+      AUTH_DEV_ANY_CODE_ALLOWLIST: '',
       LOG_LEVEL: 'silent',
       LLM_PROVIDER: 'fake',
       STT_PROVIDER: 'fake',

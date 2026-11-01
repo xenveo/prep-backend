@@ -48,7 +48,10 @@ export class AuthService {
     private readonly activity: ActivityService,
     private readonly settings: SettingsService,
   ) {
-    if (config.env.AUTH_DEV_ACCEPT_ANY_CODE)
+    if (
+      config.env.NODE_ENV !== 'production' &&
+      config.env.AUTH_DEV_ACCEPT_ANY_CODE
+    )
       this.logger.warn(
         'AUTH_DEV_ACCEPT_ANY_CODE is on: login codes are not checked for allowlisted emails',
       );
@@ -203,10 +206,11 @@ export class AuthService {
     });
   }
 
-  /** AUTH_DEV_ACCEPT_ANY_CODE: skips the code check but keeps eligibility, and burns any live codes. */
+  /** Non-production only: skips code checks but keeps eligibility and burns live codes. */
   private acceptsAnyCode(email: string): boolean {
     const env = this.config.env;
     return (
+      env.NODE_ENV !== 'production' &&
       env.AUTH_DEV_ACCEPT_ANY_CODE &&
       isAllowlisted(email, env.AUTH_DEV_ANY_CODE_ALLOWLIST)
     );
