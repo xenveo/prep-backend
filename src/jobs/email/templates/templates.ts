@@ -16,6 +16,7 @@ export type EmailVars = {
     expiresDays: number;
   };
   'role-assigned': { name: string; roleTitle: string; link: string };
+  'practice-reminder': { name: string; link: string };
   'session-complete': {
     name: string;
     roleTitle: string;
@@ -92,6 +93,15 @@ const TEMPLATES: {
         p: `You finished a ${roleTitle} practice interview and scored ${score}.`,
       },
       { button: 'See your feedback', href: link },
+    ]),
+
+  'practice-reminder': ({ name, link }) =>
+    render('Keep your interview practice going', [
+      { p: greeting(name) },
+      {
+        p: 'Your next interview practice session is ready. Log in to review your feedback and keep building your skills.',
+      },
+      { button: 'Continue practising', href: link },
     ]),
 
   'export-ready': ({ link, expiresHours }) =>

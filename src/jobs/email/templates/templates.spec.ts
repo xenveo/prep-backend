@@ -110,6 +110,20 @@ describe('renderEmail', () => {
     expect(m.text).toContain('scored 74');
   });
 
+  it('practice-reminder uses an ordinary login link and escapes the name', () => {
+    const m = renderEmail('practice-reminder', {
+      name: '<Ravi>',
+      link: 'https://app.example.com/login',
+    });
+    expect(m.subject).toBe('Keep your interview practice going');
+    expect(m.text).toContain('Hi <Ravi>,');
+    expect(m.html).toContain('Hi &lt;Ravi&gt;,');
+    expect(m.text).toContain(
+      'Continue practising: https://app.example.com/login',
+    );
+    expect(m.text).not.toContain('token=');
+  });
+
   it('export-ready', () => {
     expect(
       renderEmail('export-ready', { link: 'https://x', expiresHours: 24 }).text,

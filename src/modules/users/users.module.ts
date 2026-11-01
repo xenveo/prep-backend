@@ -6,6 +6,8 @@ import { CandidatesController } from './candidates.controller.js';
 import { InviteBatchesController } from './invite-batches.controller.js';
 import { InviteBatchesService } from './invite-batches.service.js';
 import { InvitesService } from './invites.service.js';
+import { RemindersController } from './reminders.controller.js';
+import { RemindersService } from './reminders.service.js';
 import { SavedFiltersService } from './saved-filters.service.js';
 import { UsersService } from './users.service.js';
 
@@ -15,12 +17,14 @@ import { UsersService } from './users.service.js';
     CandidatesController,
     AdminsController,
     InviteBatchesController,
+    RemindersController,
   ],
   providers: [
     AssignmentsService,
     UsersService,
     InvitesService,
     InviteBatchesService,
+    RemindersService,
     AdminsService,
     SavedFiltersService,
   ],
